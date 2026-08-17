@@ -1,0 +1,49 @@
+[project]
+name = "portfolio-bot"
+version = "0.1.0"
+description = "Retrieval-augmented chatbot backend for a personal portfolio site"
+requires-python = ">=3.12,<3.13"
+
+# Runtime dependencies are declared by the unit that first needs them. Nothing in the
+# package imports anything outside the standard library yet.
+dependencies = []
+
+[project.scripts]
+pb = "portfolio_bot.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/portfolio_bot"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
