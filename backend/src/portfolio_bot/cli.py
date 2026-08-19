@@ -7,8 +7,13 @@ it, so running `pb` is an honest description of how much of the pipeline exists.
 from __future__ import annotations
 
 import argparse
+import sys
+
+from pydantic import ValidationError
 
 from portfolio_bot import __version__
+from portfolio_bot.logging_config import configure_logging, get_logger
+from portfolio_bot.settings import get_settings
 
 # Subcommand name -> (description, roadmap item that implements it).
 PLANNED_COMMANDS: dict[str, tuple[str, str]] = {
@@ -50,6 +55,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+
+    # Settings are loaded only once a real command runs, so --help and --version work on
+    # a machine with no .env at all.
+    try:
+        settings = get_settings()
+    except ValidationError as error:
+        print("Configuration error. Compare your .env against .env.example.", file=sys.stderr)
+        print(error, file=sys.stderr)
+        return 1
+
+    configure_logging(settings)
+    logger = get_logger(__name__)
+    logger.debug("running command", extra={"command": args.command})
 
     description, item = PLANNED_COMMANDS[args.command]
     print(f"pb {args.command}: not implemented yet.")
