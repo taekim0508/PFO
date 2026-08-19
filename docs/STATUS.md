@@ -25,7 +25,20 @@ changelog and should be trimmed to the decisions that still constrain future wor
   do real work. The rest print why they have nothing to do and exit 0.
 - 10 tests, all passing. `make lint` clean (ruff check, ruff format, mypy strict).
 
-Not built yet in this area: settings module (0.3), Docker Postgres (0.4), logging (0.5).
+**Environment and skeleton (0.3, 0.4, 0.5).**
+
+- `Settings` in `settings.py` holds every tunable value, read from the environment and
+  the repo-root `.env`. `DATABASE_URL` and `MODEL_API_KEY` have no defaults, so a missing
+  one fails at startup. `get_settings()` is cached, so the environment is read once.
+- `docker-compose.yml` runs `pgvector/pgvector:pg16` with a healthcheck and a named
+  volume. `make db-up` waits for healthy; `make db-down` keeps the data.
+- `.env.example` documents every name. `make setup` copies it to `.env` when missing and
+  says what to fill in. `make db-up` refuses to run against an unfilled `.env`.
+- Logging configured once in `logging_config.py`, human-readable or JSON per
+  `LOG_FORMAT`, level per `LOG_LEVEL`. Every module gets its logger from `get_logger`.
+- 35 tests. No test touches Postgres yet; that starts with the fixtures in 1.5.
+
+Phase 0 is complete.
 
 As things get built, one line each, grouped loosely by roadmap area. This is the section
 a fresh session actually needs, so write it for someone who has read nothing else.
@@ -63,6 +76,10 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D13 | `pb` uses stdlib argparse until 2.5 | The stack table names no CLI library, and 2.5 is where real flags first exist |
 | D14 | ruff at line length 100 with `E,F,I,UP,B,SIM`; mypy strict on `src`, relaxed on `tests` | One config in `pyproject.toml`, strict where the shipped code is |
 | D15 | Makefile stays compatible with GNU Make 3.81 | The version macOS ships, so nobody has to install a newer make to build this |
+| D16 | `MODEL_API_KEY` is required; local development sets it to a placeholder | Keeps 0.3's startup check, which is what stops a production deploy with no key. Ollama discards whatever it is sent |
+| D17 | `LOG_FORMAT` (`console` or `json`) selects the log format, not an `app_env` setting | Names what it controls, instead of an environment concept that quietly grows other behavior |
+| D18 | `.env` carries both the `POSTGRES_*` parts and a full `DATABASE_URL` | Compose needs the parts, the app needs a URL, and production hands over only a URL. The duplication is local-only and documented in `.env.example` |
+| D19 | `make setup` creates `.env` from `.env.example` but never invents values | Secrets stay out of tracked files; `make db-up` guards against an unfilled `.env` rather than failing inside Docker |
 
 ## Open items
 
@@ -71,12 +88,9 @@ things noticed while doing something else that would otherwise be lost.
 
 | Item | Where it belongs |
 |---|---|
-| `MODEL_API_KEY` is meant to fail at startup when missing, but Ollama in development needs no key | 0.3 |
-| Undecided whether `make setup` creates `.env` from `.env.example`, or `make db-up` fails until it exists | 0.3 with 0.6 |
-| Local Postgres database name, user, password, and host port not chosen | 0.4 |
-| No default values chosen yet for chunk size, chunk overlap, top-k, or the RRF constant | 0.3 |
-| Nothing selects the production log format; the 0.3 settings list has no environment setting | 0.5 |
 | No LICENSE file. Not requested anywhere in the roadmap | 0.1 or 8.5 |
+| Chunking constants (1000 and 150 characters) are conventional starting values, not measured ones | 3.6 |
+| Nothing enforces that `DATABASE_URL` and the `POSTGRES_*` values in `.env` agree | 0.4, if drift ever bites |
 
 ## Findings
 

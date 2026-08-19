@@ -25,6 +25,14 @@ setup:
 	@echo "==> Python dependencies"
 	cd $(BACKEND) && $(UV) sync
 	@echo "==> Node dependencies skipped: frontend/ does not exist yet (roadmap 6.1)"
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "==> Created .env from .env.example."; \
+		echo "    Fill in POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT,"; \
+		echo "    DATABASE_URL, and MODEL_API_KEY before running make db-up."; \
+	else \
+		echo "==> .env already exists, left alone"; \
+	fi
 
 test:
 	@echo "==> Backend tests"
@@ -41,10 +49,20 @@ lint:
 	@echo "==> eslint and prettier skipped: frontend/ does not exist yet (roadmap 6.1)"
 
 db-up:
-	@echo "Nothing to do yet: docker-compose.yml lands in roadmap item 0.4."
+	@if [ ! -f .env ]; then \
+		echo "No .env found. Run 'make setup' first, then fill it in."; \
+		exit 1; \
+	fi
+	@if ! grep -qE '^POSTGRES_PASSWORD=.+' .env; then \
+		echo "POSTGRES_PASSWORD is empty in .env. Fill it in before starting Postgres."; \
+		exit 1; \
+	fi
+	docker compose up -d --wait
+	@echo "==> Postgres is up and reporting healthy"
 
 db-down:
-	@echo "Nothing to do yet: docker-compose.yml lands in roadmap item 0.4."
+	docker compose down
+	@echo "==> Stopped. The data volume is kept. 'docker compose down -v' also erases it."
 
 model-up:
 	@echo "Nothing to do yet: the local model client lands in roadmap item 4.3a."

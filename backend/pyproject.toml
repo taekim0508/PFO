@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Retrieval-augmented chatbot backend for a personal portfolio site"
 requires-python = ">=3.12,<3.13"
 
-# Runtime dependencies are declared by the unit that first needs them. Nothing in the
-# package imports anything outside the standard library yet.
-dependencies = []
+# Runtime dependencies are declared by the unit that first needs them.
+dependencies = [
+    "pydantic-settings>=2.0",
+]
 
 [project.scripts]
 pb = "portfolio_bot.cli:main"
@@ -43,6 +44,7 @@ addopts = "-q"
 python_version = "3.12"
 strict = true
 files = ["src"]
+plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
