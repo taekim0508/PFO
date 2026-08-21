@@ -1,0 +1,75 @@
+# Lint and test on every push to main and every pull request.
+#
+# Push is restricted to main while pull_request is not: a branch with an open PR would
+# otherwise fire both events and run the same commit twice.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch cancels the run still in flight for it, so a burst of
+# commits does not queue several full runs of code nobody is waiting on any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    # The same image docker-compose.yml uses locally, so CI and a laptop run the same
+    # Postgres and the same pgvector, not two things that merely both call themselves 16.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Throwaway credentials for a database that exists only for the life of this job.
+    # Nothing here authenticates to anything real, so no repository secrets are involved.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      MODEL_API_KEY: ci-placeholder
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python
+        run: uv python install
+        working-directory: backend
+
+      # --frozen fails the build if uv.lock does not match pyproject.toml, rather than
+      # quietly resolving something the developer never tested against.
+      - name: Install dependencies
+        run: uv sync --frozen
+        working-directory: backend
+
+      # Before the tests: a formatting failure is a five second fix and there is no reason
+      # to wait on the database tests to hear about it.
+      - name: Lint
+        run: make lint
+
+      # pytest directly rather than `make test`, whose Docker preflight check has nothing
+      # to look at here: Postgres is a service container, not a compose project. -rs names
+      # every skipped test, so a service container that failed to come up shows as eight
+      # skips in the log instead of passing silently.
+      - name: Test
+        run: uv run pytest -rs
+        working-directory: backend
