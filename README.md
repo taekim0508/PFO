@@ -1,5 +1,7 @@
 # Portfolio Bot
 
+[![CI](https://github.com/taekim0508/PFO/actions/workflows/ci.yml/badge.svg)](https://github.com/taekim0508/PFO/actions/workflows/ci.yml)
+
 A personal portfolio site with an embedded retrieval-augmented chatbot that answers
 questions about Tae's background, projects, and experience, grounded in a corpus of his
 own writing.
