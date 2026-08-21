@@ -59,6 +59,18 @@ Phase 0 is complete.
   and `make test` warns first so a half-run suite cannot look clean.
 - 57 tests, 8 of them against real Postgres. `make lint` clean.
 
+**Continuous integration.**
+
+- `.github/workflows/ci.yml` runs `make lint` then the backend suite on every push to
+  `main` and every pull request. Postgres runs as a service container on the same
+  `pgvector/pgvector:pg16` image compose uses, so the `database` tests execute rather than
+  skip. `pytest -rs` names every skip, so a service container that failed to start cannot
+  pass quietly. `uv sync --frozen` fails the build if `uv.lock` and `pyproject.toml`
+  disagree.
+- Verified green, verified red on a deliberately broken commit, and verified the eight
+  database tests run in CI rather than skipping.
+- README carries the CI badge.
+
 As things get built, one line each, grouped loosely by roadmap area. This is the section
 a fresh session actually needs, so write it for someone who has read nothing else.
 
@@ -103,6 +115,8 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D21 | `schema_migrations` stores a SHA-256 of each applied file | Hard rule 6 forbids editing a committed migration but nothing detected it. A checksum mismatch stops the run instead of letting fresh and existing databases drift apart |
 | D22 | `chunks.heading_path` is `text[]`, not a joined string | The innermost heading and "everything under heading X" stay direct queries; joining for display is one line, splitting back is lossy |
 | D23 | `database`-marked tests skip when Postgres is unreachable, and `make test` warns when the container is down | A fresh clone should not look broken before `make db-up`; the warning is what stops a half-run suite from reading as a clean pass |
+| D24 | CI runs on push to `main` and on pull requests, not on pushes to other branches | A branch with an open PR would fire both events and run the same commit twice; a branch without one is work in progress |
+| D25 | CI calls `pytest` directly rather than `make test` | `make test`'s Docker preflight has nothing to inspect in CI, where Postgres is a service container, and would print a false warning on every run |
 
 ## Open items
 
@@ -136,3 +150,11 @@ stack choices were unconfirmed on this machine.
   (last modified 2024-02-22). This is the string to pin in 0.3.
 - Toolchain: Docker Desktop 29.7.2 (aarch64, Compose v5.4.0), uv 0.9.6, Python 3.12.12
   installed by uv. System Python 3.11.7 left untouched.
+
+**2026-08-20, a test that did not test what it claimed.** Proving CI turns red on a broken
+commit involved deliberately changing the migration sort key from the parsed number to the
+filename. CI stayed green. The filename pattern enforces a four-digit prefix, which makes
+an alphabetical sort agree with a numeric one, so the old
+`test_sorts_by_number_not_by_filename` could not fail. Renamed to state what it does prove,
+with the real guarantee (the enforced width) named in both the test and the runner. The
+deliberate-break check was redone against the filename pattern and did turn the build red.
