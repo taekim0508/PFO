@@ -35,6 +35,12 @@ setup:
 	fi
 
 test:
+	@# Tests marked `database` skip themselves when Postgres is unreachable, which would
+	@# otherwise let a suite that ran half of itself look like a clean pass. Say so first.
+	@if ! docker compose ps --status running --services 2>/dev/null | grep -q '^db$$'; then \
+		echo "==> WARNING: Postgres is not running, so database tests will be skipped."; \
+		echo "    Run 'make db-up' to run the whole suite."; \
+	fi
 	@echo "==> Backend tests"
 	cd $(BACKEND) && $(UV) run pytest
 	@echo "==> Frontend tests skipped: frontend/ does not exist yet (roadmap 6.1)"
@@ -68,7 +74,7 @@ model-up:
 	@echo "Nothing to do yet: the local model client lands in roadmap item 4.3a."
 
 migrate:
-	@echo "Nothing to do yet: the migration runner lands in roadmap item 1.1."
+	cd $(BACKEND) && $(UV) run pb migrate
 
 ingest:
 	@echo "Nothing to do yet: the ingestion pipeline lands in roadmap item 2.5."

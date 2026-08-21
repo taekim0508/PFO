@@ -40,6 +40,25 @@ changelog and should be trimmed to the decisions that still constrain future wor
 
 Phase 0 is complete.
 
+**Database and migrations (1.1, 1.2).**
+
+- `backend/migrations/` holds numbered `.sql` files. `0001_initial.sql` creates the
+  `vector` extension and three tables: `documents` (one per markdown file, with a
+  content hash so re-ingestion can skip unchanged files), `chunks` (one per slice, with
+  character offsets and a `text[]` heading path, cascading from its document), and
+  `chunk_embeddings` (one per chunk, `vector(384)`, with the model name and revision that
+  produced it). No indexes yet; those are 1.4.
+- `db/migrate.py` discovers migrations by numeric prefix, records applied ones with a
+  SHA-256 checksum in `schema_migrations`, and applies each pending file in a transaction
+  that also writes its bookkeeping row, so a failure leaves neither. It opens its own
+  connection, not the pool. Editing a committed migration is refused at the next run.
+- `pb migrate` and `make migrate` do real work. `make migrate` twice on an empty database
+  gives `applied 1 migration` then `no pending migrations`.
+- Tests marked `database` create a randomly named throwaway database, run every migration
+  into it, and drop it. They skip with a readable message when Postgres is unreachable,
+  and `make test` warns first so a half-run suite cannot look clean.
+- 57 tests, 8 of them against real Postgres. `make lint` clean.
+
 As things get built, one line each, grouped loosely by roadmap area. This is the section
 a fresh session actually needs, so write it for someone who has read nothing else.
 
@@ -80,6 +99,10 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D17 | `LOG_FORMAT` (`console` or `json`) selects the log format, not an `app_env` setting | Names what it controls, instead of an environment concept that quietly grows other behavior |
 | D18 | `.env` carries both the `POSTGRES_*` parts and a full `DATABASE_URL` | Compose needs the parts, the app needs a URL, and production hands over only a URL. The duplication is local-only and documented in `.env.example` |
 | D19 | `make setup` creates `.env` from `.env.example` but never invents values | Secrets stay out of tracked files; `make db-up` guards against an unfilled `.env` rather than failing inside Docker |
+| D20 | The migration runner opens its own connection, not the 1.3 pool | A pool amortizes setup across many short concurrent requests; a migration run is one sequential job that has to work before the application is wired up |
+| D21 | `schema_migrations` stores a SHA-256 of each applied file | Hard rule 6 forbids editing a committed migration but nothing detected it. A checksum mismatch stops the run instead of letting fresh and existing databases drift apart |
+| D22 | `chunks.heading_path` is `text[]`, not a joined string | The innermost heading and "everything under heading X" stay direct queries; joining for display is one line, splitting back is lossy |
+| D23 | `database`-marked tests skip when Postgres is unreachable, and `make test` warns when the container is down | A fresh clone should not look broken before `make db-up`; the warning is what stops a half-run suite from reading as a clean pass |
 
 ## Open items
 
@@ -91,6 +114,8 @@ things noticed while doing something else that would otherwise be lost.
 | No LICENSE file. Not requested anywhere in the roadmap | 0.1 or 8.5 |
 | Chunking constants (1000 and 150 characters) are conventional starting values, not measured ones | 3.6 |
 | Nothing enforces that `DATABASE_URL` and the `POSTGRES_*` values in `.env` agree | 0.4, if drift ever bites |
+| The throwaway-database fixture lives in `test_migrate.py` and derives a maintenance URL by swapping the database name in `DATABASE_URL`. It should move to `conftest.py` | 1.5, which is expected to replace it |
+| Nothing rolls a migration back. Forward-only is fine for now; there is no `pb migrate --down` | Not requested anywhere; raise if it ever matters |
 
 ## Findings
 
