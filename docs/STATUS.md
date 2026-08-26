@@ -47,7 +47,7 @@ Phase 0 is complete.
   content hash so re-ingestion can skip unchanged files), `chunks` (one per slice, with
   character offsets and a `text[]` heading path, cascading from its document), and
   `chunk_embeddings` (one per chunk, `vector(384)`, with the model name and revision that
-  produced it). No indexes yet; those are 1.4.
+  produced it). Indexes are in 0002 rather than here.
 - `db/migrate.py` discovers migrations by numeric prefix, records applied ones with a
   SHA-256 checksum in `schema_migrations`, and applies each pending file in a transaction
   that also writes its bookkeeping row, so a failure leaves neither. It opens its own
@@ -58,6 +58,21 @@ Phase 0 is complete.
   into it, and drop it. They skip with a readable message when Postgres is unreachable,
   and `make test` warns first so a half-run suite cannot look clean.
 - 57 tests, 8 of them against real Postgres. `make lint` clean.
+
+**Database and migrations (1.4).**
+
+- `0002_indexes.sql` adds the two indexes retrieval needs: an HNSW index on
+  `chunk_embeddings.embedding` with `vector_cosine_ops` and explicit `m` and
+  `ef_construction`, and a GIN index on `to_tsvector('english', text)` over `chunks` for
+  the lexical arm. Nothing else changed; the runner has no schema knowledge and did not
+  need any.
+- `make migrate` on a database at 0001 applies it and a second run reports nothing pending.
+  `pg_indexes` for the two tables shows five indexes: the two new ones plus the three the
+  primary keys and the unique constraint created in 0001.
+- Three new tests. One checks the indexes exist. Two run `EXPLAIN` with `enable_seqscan`
+  off and assert the planner reaches for each index, which is the check that catches an
+  index that exists and is silently never used.
+- 60 tests, 11 of them against real Postgres. `make lint` clean.
 
 **Continuous integration.**
 
@@ -117,6 +132,8 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D23 | `database`-marked tests skip when Postgres is unreachable, and `make test` warns when the container is down | A fresh clone should not look broken before `make db-up`; the warning is what stops a half-run suite from reading as a clean pass |
 | D24 | CI runs on push to `main` and on pull requests, not on pushes to other branches | A branch with an open PR would fire both events and run the same commit twice; a branch without one is work in progress |
 | D25 | CI calls `pytest` directly rather than `make test` | `make test`'s Docker preflight has nothing to inspect in CI, where Postgres is a service container, and would print a false warning on every run |
+| D26 | No standalone btree on `chunks.document_id` | The index behind `UNIQUE (document_id, ordinal)` already leads with that column, and Postgres uses a composite index for a leading-column prefix. A second one would find the same rows while taxing every chunk insert |
+| D27 | Indexes are created with plain `CREATE INDEX`, not `CREATE INDEX CONCURRENTLY` | Concurrently avoids locking writes but cannot run inside a transaction, and the runner wraps every migration in one. Revisit the first time an index is added to a live table carrying traffic |
 
 ## Open items
 
@@ -130,6 +147,8 @@ things noticed while doing something else that would otherwise be lost.
 | Nothing enforces that `DATABASE_URL` and the `POSTGRES_*` values in `.env` agree | 0.4, if drift ever bites |
 | The throwaway-database fixture lives in `test_migrate.py` and derives a maintenance URL by swapping the database name in `DATABASE_URL`. It should move to `conftest.py` | 1.5, which is expected to replace it |
 | Nothing rolls a migration back. Forward-only is fine for now; there is no `pb migrate --down` | Not requested anywhere; raise if it ever matters |
+| The GIN index covers `chunks.text` alone. Headings are searchable only where the chunk body repeats them | 3.2, if the lexical arm turns out to want them |
+| `m` and `ef_construction` are pgvector's defaults, written out but never measured | 8.2, once there is a corpus to measure recall against |
 
 ## Findings
 
@@ -158,3 +177,12 @@ an alphabetical sort agree with a numeric one, so the old
 `test_sorts_by_number_not_by_filename` could not fail. Renamed to state what it does prove,
 with the real guarantee (the enforced width) named in both the test and the runner. The
 deliberate-break check was redone against the filename pattern and did turn the build red.
+
+**2026-08-26, the index tests were verified red.** A `pg_indexes` row proves an index
+exists, not that anything uses it. Rebuilding the HNSW index with `vector_l2_ops` and
+rerunning confirmed that `test_the_vector_index_serves_a_cosine_similarity_search` fails:
+the plan falls back to a sort, because `<=>` is cosine distance and an L2 index cannot
+serve it. Without the plan assertion that change would have passed the suite and quietly
+disabled vector search. Separately, the first draft of the full-text test assumed the
+English stemmer reduces "chunker" to "chunk". It does not; the corpus lexeme is `chunker`.
+The test now uses "splits" against a query of "splitting", both of which reduce to `split`.
