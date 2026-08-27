@@ -74,6 +74,25 @@ Phase 0 is complete.
   index that exists and is silently never used.
 - 60 tests, 11 of them against real Postgres. `make lint` clean.
 
+**Database and migrations (1.3).**
+
+- `db/pool.py` is the only place the application opens a connection. `create_pool(url)`
+  builds and opens a `psycopg_pool.ConnectionPool` for an explicit URL, `get_pool()` is the
+  process-wide one built on first use from settings, `close_pool()` shuts it down and lets a
+  later call build a fresh one.
+- `connection()` lends a pooled connection; `transaction()` lends one with the block wrapped
+  in an explicit transaction, which psycopg turns into a SAVEPOINT when nested. Both reuse
+  the connection already in play via a `ContextVar`, so an inner block joins the outer
+  transaction rather than opening a second one on a second connection.
+- Rows come back keyed by column name, set once on the pool rather than per call site.
+- The pool opens with `wait=True`, so a wrong URL or an unreachable server fails at startup
+  instead of inside the first query. A failed open closes the pool before re-raising.
+- `psycopg-pool` added as a runtime dependency; `uv.lock` regenerated. `db_pool_min_size`,
+  `db_pool_max_size`, and `db_pool_timeout` added to settings and `.env.example`.
+- Nothing calls the pool yet, so this unit adds no user-visible behavior. 1.5 and phase 2
+  are what consume it.
+- 71 tests, 21 of them against real Postgres. `make lint` clean.
+
 **Continuous integration.**
 
 - `.github/workflows/ci.yml` runs `make lint` then the backend suite on every push to
@@ -134,6 +153,10 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D25 | CI calls `pytest` directly rather than `make test` | `make test`'s Docker preflight has nothing to inspect in CI, where Postgres is a service container, and would print a false warning on every run |
 | D26 | No standalone btree on `chunks.document_id` | The index behind `UNIQUE (document_id, ordinal)` already leads with that column, and Postgres uses a composite index for a leading-column prefix. A second one would find the same rows while taxing every chunk insert |
 | D27 | Indexes are created with plain `CREATE INDEX`, not `CREATE INDEX CONCURRENTLY` | Concurrently avoids locking writes but cannot run inside a transaction, and the runner wraps every migration in one. Revisit the first time an index is added to a live table carrying traffic |
+| D28 | The pool is a module global behind a `threading.Lock`, not an `lru_cache` | `lru_cache` can run its function twice when two threads race, and the loser's pool holds real connections with nothing left to close it. Uvicorn serves from a thread pool, so the race is live |
+| D29 | `connection()` and `transaction()` reuse the connection already in play, tracked in a `ContextVar` | Nesting is the only thing `transaction()` adds over `connection()`, and it only works on one connection. Two connections would be two transactions, and the inner one could not see the outer one's uncommitted writes |
+| D30 | The pool opens eagerly with `wait=True` | Matches 0.3's choice to fail at startup on missing configuration, rather than surfacing a bad URL inside whichever query runs first |
+| D31 | `db_pool_max_size` defaults to 10 | Neon caps concurrent connections, and each uvicorn worker process gets its own pool, so the real ceiling is this number times the worker count |
 
 ## Open items
 
@@ -149,6 +172,9 @@ things noticed while doing something else that would otherwise be lost.
 | Nothing rolls a migration back. Forward-only is fine for now; there is no `pb migrate --down` | Not requested anywhere; raise if it ever matters |
 | The GIN index covers `chunks.text` alone. Headings are searchable only where the chunk body repeats them | 3.2, if the lexical arm turns out to want them |
 | `m` and `ef_construction` are pgvector's defaults, written out but never measured | 8.2, once there is a corpus to measure recall against |
+| `test_pool.py` imports the `throwaway_database` fixture from `test_migrate.py` rather than getting it from `conftest.py` | 1.5, which moves the fixture |
+| The pool exposes live statistics (connections in use, waiters, wait time). Nothing surfaces them, and "the bot is slow" and "the pool is exhausted" look identical from outside | 5.x, on a health endpoint |
+| No statement timeout is configured on pooled connections, so one runaway query can hold a connection indefinitely | 5.x or 7.x, once there is real traffic |
 
 ## Findings
 
@@ -186,3 +212,9 @@ serve it. Without the plan assertion that change would have passed the suite and
 disabled vector search. Separately, the first draft of the full-text test assumed the
 English stemmer reduces "chunker" to "chunk". It does not; the corpus lexeme is `chunker`.
 The test now uses "splits" against a query of "splitting", both of which reduce to `split`.
+
+**2026-08-27, the connection-release test was verified red.** A test that borrows a
+connection twice in sequence passes whether or not the first one was ever given back, if the
+pool has spares. Capping the pool at one connection is what makes it meaningful. Confirmed
+by rewriting `connection()` to take a connection with `getconn()` and never return it: the
+second block blocked and failed with `PoolTimeout` after three seconds. Reverted after.

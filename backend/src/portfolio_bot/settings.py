@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     # would break the secrets rule, so a missing DATABASE_URL fails at startup.
     database_url: str
 
+    # Connection pool. max_size stays deliberately small: Neon caps concurrent connections
+    # on the plan this deploys to, and running several uvicorn workers multiplies this
+    # number by the worker count, which is the usual way that cap gets blown. timeout is how
+    # long a caller waits for a free connection before giving up, in seconds.
+    db_pool_min_size: int = 1
+    db_pool_max_size: int = 10
+    db_pool_timeout: float = 30.0
+
     # Embeddings. The revision is pinned so an upstream change to the model cannot
     # silently alter the vectors already stored in the database.
     embedding_model_name: str = "BAAI/bge-small-en-v1.5"
