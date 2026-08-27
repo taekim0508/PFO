@@ -23,16 +23,11 @@ from portfolio_bot.db.pool import (
 )
 from portfolio_bot.settings import get_settings
 
-# Roadmap 1.5 moves this fixture into conftest.py for the whole suite. Importing it across
-# test modules is the smaller of two evils until then; the alternative is a second copy that
-# would have to be deleted twice.
-from tests.test_migrate import throwaway_database  # noqa: F401
-
 INSERT_DOCUMENT = "INSERT INTO documents (source_path, title, content_hash) VALUES (%s, 'T', 'h')"
 
 
 @pytest.fixture
-def pooled_database(throwaway_database, monkeypatch):  # noqa: F811
+def pooled_database(empty_database, monkeypatch):
     """Point the process-wide pool at a throwaway database that has the schema applied.
 
     The pool reads its URL from settings, so redirecting it means setting the environment
@@ -40,13 +35,13 @@ def pooled_database(throwaway_database, monkeypatch):  # noqa: F811
     inherits one built against another database, on the way out so connections are not left
     open against a database that is about to be dropped.
     """
-    run_migrations(throwaway_database)
+    run_migrations(empty_database)
 
     close_pool()
-    monkeypatch.setenv("DATABASE_URL", throwaway_database)
+    monkeypatch.setenv("DATABASE_URL", empty_database)
     get_settings.cache_clear()
 
-    yield throwaway_database
+    yield empty_database
 
     close_pool()
     get_settings.cache_clear()

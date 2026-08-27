@@ -54,9 +54,9 @@ Phase 0 is complete.
   connection, not the pool. Editing a committed migration is refused at the next run.
 - `pb migrate` and `make migrate` do real work. `make migrate` twice on an empty database
   gives `applied 1 migration` then `no pending migrations`.
-- Tests marked `database` create a randomly named throwaway database, run every migration
-  into it, and drop it. They skip with a readable message when Postgres is unreachable,
-  and `make test` warns first so a half-run suite cannot look clean.
+- Tests marked `database` never touch the developer's database. They skip with a readable
+  message when Postgres is unreachable, and `make test` warns first so a half-run suite
+  cannot look clean. The fixtures that build their databases are described under 1.5.
 - 57 tests, 8 of them against real Postgres. `make lint` clean.
 
 **Database and migrations (1.4).**
@@ -92,6 +92,24 @@ Phase 0 is complete.
 - Nothing calls the pool yet, so this unit adds no user-visible behavior. 1.5 and phase 2
   are what consume it.
 - 71 tests, 21 of them against real Postgres. `make lint` clean.
+
+**Database and migrations (1.5).**
+
+- `tests/conftest.py` offers two kinds of database. `empty_database` is a throwaway with no
+  tables, created and dropped per test, which is what the migration tests need because
+  applying migrations is their subject. `migrated_database` is one database with every
+  migration applied, built once for the whole run.
+- `db` is the fixture everything from phase 2 on will use: a connection to
+  `migrated_database` inside a transaction opened with `force_rollback`, so nothing a test
+  writes is ever committed, whether the test passed or failed. Rows come back keyed by
+  column name, matching what the pool hands production code.
+- The local fixture in `test_migrate.py` is gone, and `test_pool.py` no longer imports
+  across test modules. Both were open items.
+- Pool tests keep a database per test. The pool opens its own connections, which are not
+  inside the test's transaction, so the rollback would not cover what they write.
+- 76 tests, 26 of them against real Postgres. `make lint` clean.
+
+Phase 1 is complete.
 
 **Continuous integration.**
 
@@ -157,6 +175,9 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D29 | `connection()` and `transaction()` reuse the connection already in play, tracked in a `ContextVar` | Nesting is the only thing `transaction()` adds over `connection()`, and it only works on one connection. Two connections would be two transactions, and the inner one could not see the outer one's uncommitted writes |
 | D30 | The pool opens eagerly with `wait=True` | Matches 0.3's choice to fail at startup on missing configuration, rather than surfacing a bad URL inside whichever query runs first |
 | D31 | `db_pool_max_size` defaults to 10 | Neon caps concurrent connections, and each uvicorn worker process gets its own pool, so the real ceiling is this number times the worker count |
+| D32 | Two kinds of test database: `empty_database` per test, `migrated_database` once per run | Migration tests must start from nothing, since applying migrations is what they test. Everything else wants the tables already there and does not want to pay for building them per test |
+| D33 | The `db` fixture rolls back unconditionally rather than relying on a connection's own rollback | A plain connection commits on success, so a *passing* test would be the one that leaves rows behind. Isolation cannot depend on the test failing |
+| D34 | Pool tests keep a database per test instead of sharing `migrated_database` | The pool opens its own connections, which sit outside the test's transaction, so nothing it writes would roll back |
 
 ## Open items
 
@@ -168,11 +189,9 @@ things noticed while doing something else that would otherwise be lost.
 | No LICENSE file. Not requested anywhere in the roadmap | 0.1 or 8.5 |
 | Chunking constants (1000 and 150 characters) are conventional starting values, not measured ones | 3.6 |
 | Nothing enforces that `DATABASE_URL` and the `POSTGRES_*` values in `.env` agree | 0.4, if drift ever bites |
-| The throwaway-database fixture lives in `test_migrate.py` and derives a maintenance URL by swapping the database name in `DATABASE_URL`. It should move to `conftest.py` | 1.5, which is expected to replace it |
 | Nothing rolls a migration back. Forward-only is fine for now; there is no `pb migrate --down` | Not requested anywhere; raise if it ever matters |
 | The GIN index covers `chunks.text` alone. Headings are searchable only where the chunk body repeats them | 3.2, if the lexical arm turns out to want them |
 | `m` and `ef_construction` are pgvector's defaults, written out but never measured | 8.2, once there is a corpus to measure recall against |
-| `test_pool.py` imports the `throwaway_database` fixture from `test_migrate.py` rather than getting it from `conftest.py` | 1.5, which moves the fixture |
 | The pool exposes live statistics (connections in use, waiters, wait time). Nothing surfaces them, and "the bot is slow" and "the pool is exhausted" look identical from outside | 5.x, on a health endpoint |
 | No statement timeout is configured on pooled connections, so one runaway query can hold a connection indefinitely | 5.x or 7.x, once there is real traffic |
 
@@ -218,3 +237,11 @@ connection twice in sequence passes whether or not the first one was ever given 
 pool has spares. Capping the pool at one connection is what makes it meaningful. Confirmed
 by rewriting `connection()` to take a connection with `getconn()` and never return it: the
 second block blocked and failed with `PoolTimeout` after three seconds. Reverted after.
+
+**2026-08-27, the rollback fixture was verified red.** A fixture that isolates nothing looks
+identical to one that works, until a test reads a row it did not write. Replacing
+`conn.transaction(force_rollback=True)` with a plain `conn.transaction()` made
+`test_db_leaves_nothing_behind_for_the_next_test` fail, finding the document the previous
+test had written. Note which direction that breaks in: with a plain transaction the earlier
+test still passed, because its write is invisible to other connections while uncommitted.
+It is the *passing* test that commits and pollutes. Reverted after.
