@@ -2,20 +2,17 @@
 
 Split in two. Discovery and ordering are pure functions over files on disk and need no
 database. Applying, idempotency, rollback, and drift detection are only meaningful against
-real Postgres, so they run against a throwaway database created for each test and dropped
-afterwards. Nothing here mocks the database.
+real Postgres, so they run against the empty_database fixture from conftest.py, which builds
+a throwaway database for each test and drops it afterwards. Nothing here mocks the database.
 """
 
 from __future__ import annotations
 
 import shutil
-import uuid
 from pathlib import Path
 
 import psycopg
 import pytest
-from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from portfolio_bot.db.migrate import (
     MIGRATIONS_DIR,
@@ -24,7 +21,6 @@ from portfolio_bot.db.migrate import (
     discover_migrations,
     run_migrations,
 )
-from portfolio_bot.settings import get_settings
 
 # A 384-dimension vector, written the way Postgres accepts a vector literal. The real
 # values come from the embedding model in phase 2; here only the width matters.
@@ -111,44 +107,6 @@ def test_the_real_migrations_directory_is_discoverable():
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def throwaway_database(request):
-    """Create an empty database for one test, yield its URL, and drop it afterwards.
-
-    The developer's DATABASE_URL is used only to reach the server. The database it names
-    is never touched: this connects to the `postgres` maintenance database alongside it,
-    creates a randomly named database, and drops that at the end.
-
-    This is deliberately local to this file. Roadmap 1.5 generalizes it into conftest.py
-    for the whole suite and is expected to replace it.
-    """
-    if request.node.get_closest_marker("database") is None:
-        raise RuntimeError("throwaway_database requires the 'database' marker")
-
-    parts = conninfo_to_dict(get_settings().database_url)
-    maintenance_url = make_conninfo(**{**parts, "dbname": "postgres"})
-
-    try:
-        with psycopg.connect(maintenance_url, autocommit=True, connect_timeout=3):
-            pass
-    except psycopg.OperationalError as error:
-        pytest.skip(f"Postgres is not reachable, run 'make db-up' first. ({error})")
-
-    name = f"pb_test_{uuid.uuid4().hex[:12]}"
-    with psycopg.connect(maintenance_url, autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-
-    try:
-        yield make_conninfo(**{**parts, "dbname": name})
-    finally:
-        with psycopg.connect(maintenance_url, autocommit=True) as conn:
-            conn.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
-                (name,),
-            )
-            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
-
-
 def table_names(database_url: str) -> set[str]:
     """Return the names of every table in the public schema."""
     with psycopg.connect(database_url) as conn:
@@ -159,31 +117,31 @@ def table_names(database_url: str) -> set[str]:
 
 
 @pytest.mark.database
-def test_first_run_creates_the_schema(throwaway_database):
-    applied = run_migrations(throwaway_database)
+def test_first_run_creates_the_schema(empty_database):
+    applied = run_migrations(empty_database)
 
     # Listed rather than derived from discover_migrations, which is what the runner itself
     # calls: comparing the runner against its own input would pass no matter what it did.
     assert applied == ["0001_initial.sql", "0002_indexes.sql"]
-    assert {"documents", "chunks", "chunk_embeddings"} <= table_names(throwaway_database)
+    assert {"documents", "chunks", "chunk_embeddings"} <= table_names(empty_database)
 
 
 @pytest.mark.database
-def test_second_run_changes_nothing(throwaway_database):
-    run_migrations(throwaway_database)
+def test_second_run_changes_nothing(empty_database):
+    run_migrations(empty_database)
 
-    assert run_migrations(throwaway_database) == []
+    assert run_migrations(empty_database) == []
 
-    with psycopg.connect(throwaway_database) as conn:
+    with psycopg.connect(empty_database) as conn:
         rows = conn.execute("SELECT filename FROM schema_migrations").fetchall()
     assert [name for (name,) in rows] == ["0001_initial.sql", "0002_indexes.sql"]
 
 
 @pytest.mark.database
-def test_a_document_chunk_and_embedding_round_trip(throwaway_database):
-    run_migrations(throwaway_database)
+def test_a_document_chunk_and_embedding_round_trip(empty_database):
+    run_migrations(empty_database)
 
-    with psycopg.connect(throwaway_database) as conn:
+    with psycopg.connect(empty_database) as conn:
         (document_id,) = conn.execute(
             "INSERT INTO documents (source_path, title, content_hash) "
             "VALUES (%s, %s, %s) RETURNING id",
@@ -216,10 +174,10 @@ def test_a_document_chunk_and_embedding_round_trip(throwaway_database):
 
 
 @pytest.mark.database
-def test_deleting_a_document_cascades(throwaway_database):
-    run_migrations(throwaway_database)
+def test_deleting_a_document_cascades(empty_database):
+    run_migrations(empty_database)
 
-    with psycopg.connect(throwaway_database) as conn:
+    with psycopg.connect(empty_database) as conn:
         (document_id,) = conn.execute(
             "INSERT INTO documents (source_path, title, content_hash) "
             "VALUES ('content/about.md', 'About', 'abc123') RETURNING id"
@@ -244,7 +202,7 @@ def test_deleting_a_document_cascades(throwaway_database):
 
 
 @pytest.mark.database
-def test_a_failing_migration_leaves_no_trace(throwaway_database, tmp_path):
+def test_a_failing_migration_leaves_no_trace(empty_database, tmp_path):
     # 0002 creates a table and then contains invalid SQL. Both halves must be undone.
     shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", tmp_path / "0001_initial.sql")
     write_migration(
@@ -254,44 +212,44 @@ def test_a_failing_migration_leaves_no_trace(throwaway_database, tmp_path):
     )
 
     with pytest.raises(psycopg.errors.SyntaxError):
-        run_migrations(throwaway_database, tmp_path)
+        run_migrations(empty_database, tmp_path)
 
-    assert "half_created" not in table_names(throwaway_database)
-    with psycopg.connect(throwaway_database) as conn:
+    assert "half_created" not in table_names(empty_database)
+    with psycopg.connect(empty_database) as conn:
         rows = conn.execute("SELECT filename FROM schema_migrations").fetchall()
     # 0001 ran in its own transaction and stands; 0002 left nothing behind.
     assert [name for (name,) in rows] == ["0001_initial.sql"]
 
 
 @pytest.mark.database
-def test_editing_an_applied_migration_is_refused(throwaway_database, tmp_path):
+def test_editing_an_applied_migration_is_refused(empty_database, tmp_path):
     write_migration(tmp_path, "0001_first.sql", "CREATE TABLE example (id int);\n")
-    run_migrations(throwaway_database, tmp_path)
+    run_migrations(empty_database, tmp_path)
 
     write_migration(tmp_path, "0001_first.sql", "CREATE TABLE example (id bigint);\n")
 
     with pytest.raises(MigrationError, match="has changed since it was applied"):
-        run_migrations(throwaway_database, tmp_path)
+        run_migrations(empty_database, tmp_path)
 
 
 @pytest.mark.database
-def test_an_unchanged_applied_migration_passes_the_check(throwaway_database, tmp_path):
+def test_an_unchanged_applied_migration_passes_the_check(empty_database, tmp_path):
     write_migration(tmp_path, "0001_first.sql", "CREATE TABLE example (id int);\n")
-    run_migrations(throwaway_database, tmp_path)
+    run_migrations(empty_database, tmp_path)
 
-    assert run_migrations(throwaway_database, tmp_path) == []
+    assert run_migrations(empty_database, tmp_path) == []
 
 
 @pytest.mark.database
-def test_a_migration_applied_but_missing_from_disk_is_tolerated(throwaway_database, tmp_path):
+def test_a_migration_applied_but_missing_from_disk_is_tolerated(empty_database, tmp_path):
     # Happens legitimately on an older checkout, so it warns rather than failing.
     write_migration(tmp_path, "0001_first.sql", "CREATE TABLE example (id int);\n")
     write_migration(tmp_path, "0002_second.sql", "CREATE TABLE other (id int);\n")
-    run_migrations(throwaway_database, tmp_path)
+    run_migrations(empty_database, tmp_path)
 
     (tmp_path / "0002_second.sql").unlink()
 
-    assert run_migrations(throwaway_database, tmp_path) == []
+    assert run_migrations(empty_database, tmp_path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -355,10 +313,10 @@ def query_plan(conn, query: str) -> str:
 
 
 @pytest.mark.database
-def test_the_index_migration_creates_both_retrieval_indexes(throwaway_database):
-    run_migrations(throwaway_database)
+def test_the_index_migration_creates_both_retrieval_indexes(empty_database):
+    run_migrations(empty_database)
 
-    with psycopg.connect(throwaway_database) as conn:
+    with psycopg.connect(empty_database) as conn:
         rows = conn.execute(
             "SELECT indexname FROM pg_indexes WHERE tablename IN ('chunks', 'chunk_embeddings')"
         ).fetchall()
@@ -372,10 +330,10 @@ def test_the_index_migration_creates_both_retrieval_indexes(throwaway_database):
 
 
 @pytest.mark.database
-def test_the_vector_index_serves_a_cosine_similarity_search(throwaway_database):
-    run_migrations(throwaway_database)
+def test_the_vector_index_serves_a_cosine_similarity_search(empty_database):
+    run_migrations(empty_database)
 
-    with psycopg.connect(throwaway_database) as conn:
+    with psycopg.connect(empty_database) as conn:
         seed_chunks(conn)
 
         plan = query_plan(
@@ -390,10 +348,10 @@ def test_the_vector_index_serves_a_cosine_similarity_search(throwaway_database):
 
 
 @pytest.mark.database
-def test_the_text_index_serves_a_full_text_search(throwaway_database):
-    run_migrations(throwaway_database)
+def test_the_text_index_serves_a_full_text_search(empty_database):
+    run_migrations(empty_database)
 
-    with psycopg.connect(throwaway_database) as conn:
+    with psycopg.connect(empty_database) as conn:
         seed_chunks(conn)
 
         plan = query_plan(
