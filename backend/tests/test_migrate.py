@@ -100,7 +100,10 @@ def test_reads_contents_and_checksums_them(tmp_path):
 
 def test_the_real_migrations_directory_is_discoverable():
     # The runner is only useful if it can find the migrations the project actually ships.
-    assert [m.filename for m in discover_migrations(MIGRATIONS_DIR)] == ["0001_initial.sql"]
+    assert [m.filename for m in discover_migrations(MIGRATIONS_DIR)] == [
+        "0001_initial.sql",
+        "0002_indexes.sql",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +162,9 @@ def table_names(database_url: str) -> set[str]:
 def test_first_run_creates_the_schema(throwaway_database):
     applied = run_migrations(throwaway_database)
 
-    assert applied == ["0001_initial.sql"]
+    # Listed rather than derived from discover_migrations, which is what the runner itself
+    # calls: comparing the runner against its own input would pass no matter what it did.
+    assert applied == ["0001_initial.sql", "0002_indexes.sql"]
     assert {"documents", "chunks", "chunk_embeddings"} <= table_names(throwaway_database)
 
 
@@ -171,7 +176,7 @@ def test_second_run_changes_nothing(throwaway_database):
 
     with psycopg.connect(throwaway_database) as conn:
         rows = conn.execute("SELECT filename FROM schema_migrations").fetchall()
-    assert [name for (name,) in rows] == ["0001_initial.sql"]
+    assert [name for (name,) in rows] == ["0001_initial.sql", "0002_indexes.sql"]
 
 
 @pytest.mark.database
@@ -287,3 +292,124 @@ def test_a_migration_applied_but_missing_from_disk_is_tolerated(throwaway_databa
     (tmp_path / "0002_second.sql").unlink()
 
     assert run_migrations(throwaway_database, tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# Indexes. Real Postgres.
+#
+# Existing does not mean used. An index built with the wrong operator class, or an
+# expression index the query spells differently, appears in pg_indexes and is then ignored
+# by every query it was meant to serve, with nothing failing to say so. So one test checks
+# that the indexes exist and two check that the planner actually reaches for them.
+# ---------------------------------------------------------------------------
+
+# Distinct wording per chunk so the full-text test matches one row rather than all of them.
+CHUNK_TEXTS = [
+    "Postgres and pgvector store the corpus and its embeddings in one system.",
+    "The chunker splits markdown on headings and keeps character offsets.",
+    "Reciprocal rank fusion merges the two retrieval arms into one ranking.",
+    "The generation layer speaks an OpenAI-compatible protocol to an open-weight model.",
+    "Migrations are numbered SQL files applied once each inside a transaction.",
+]
+
+
+def seed_chunks(conn) -> None:
+    """Insert one document with several chunks and embeddings, then update the statistics.
+
+    ANALYZE matters here. The planner chooses on estimated cost, and on a table it has
+    never looked at it works from defaults that have nothing to do with what is really
+    there, which makes a plan assertion a coin flip.
+    """
+    (document_id,) = conn.execute(
+        "INSERT INTO documents (source_path, title, content_hash) "
+        "VALUES ('content/about.md', 'About', 'abc123') RETURNING id"
+    ).fetchone()
+
+    for ordinal, text in enumerate(CHUNK_TEXTS):
+        (chunk_id,) = conn.execute(
+            "INSERT INTO chunks "
+            "(document_id, ordinal, text, token_count, char_start, char_end) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (document_id, ordinal, text, len(text.split()), 0, len(text)),
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO chunk_embeddings (chunk_id, embedding, model_name, model_revision) "
+            "VALUES (%s, %s, 'm', 'r')",
+            (chunk_id, SAMPLE_EMBEDDING),
+        )
+
+    conn.execute("ANALYZE documents, chunks, chunk_embeddings")
+
+
+def query_plan(conn, query: str) -> str:
+    """Return the plan for `query` as one string, with sequential scans discouraged.
+
+    On five rows a sequential scan is genuinely the cheapest way to answer anything, so the
+    planner would ignore both indexes no matter how well they were built. Turning seqscan
+    off removes that confound and leaves the question these tests are actually asking: given
+    that the planner wants to use an index, is there one it can use for this query.
+    """
+    conn.execute("SET enable_seqscan = off")
+    rows = conn.execute("EXPLAIN " + query).fetchall()
+    return "\n".join(str(line) for (line,) in rows)
+
+
+@pytest.mark.database
+def test_the_index_migration_creates_both_retrieval_indexes(throwaway_database):
+    run_migrations(throwaway_database)
+
+    with psycopg.connect(throwaway_database) as conn:
+        rows = conn.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename IN ('chunks', 'chunk_embeddings')"
+        ).fetchall()
+
+    indexes = {str(name) for (name,) in rows}
+    assert "chunk_embeddings_embedding_hnsw" in indexes
+    assert "chunks_text_fts" in indexes
+    # The lookup path for a document's chunks, in reading order, which is why 0002 does not
+    # add a second index on document_id alone.
+    assert "chunks_document_id_ordinal_key" in indexes
+
+
+@pytest.mark.database
+def test_the_vector_index_serves_a_cosine_similarity_search(throwaway_database):
+    run_migrations(throwaway_database)
+
+    with psycopg.connect(throwaway_database) as conn:
+        seed_chunks(conn)
+
+        plan = query_plan(
+            conn,
+            "SELECT chunk_id FROM chunk_embeddings "
+            f"ORDER BY embedding <=> '{SAMPLE_EMBEDDING}'::vector LIMIT 3",
+        )
+
+    # <=> is cosine distance, and only an index built with vector_cosine_ops answers it.
+    # Build this index with vector_l2_ops instead and this is the assertion that fails.
+    assert "chunk_embeddings_embedding_hnsw" in plan
+
+
+@pytest.mark.database
+def test_the_text_index_serves_a_full_text_search(throwaway_database):
+    run_migrations(throwaway_database)
+
+    with psycopg.connect(throwaway_database) as conn:
+        seed_chunks(conn)
+
+        plan = query_plan(
+            conn,
+            "SELECT id FROM chunks "
+            "WHERE to_tsvector('english', text) @@ plainto_tsquery('english', 'splitting')",
+        )
+        matches = conn.execute(
+            "SELECT ordinal FROM chunks "
+            "WHERE to_tsvector('english', text) @@ plainto_tsquery('english', 'splitting')"
+        ).fetchall()
+
+    # The index is on an expression, so the query has to spell that expression the same way
+    # to get it. Changing the language in the migration and not here breaks this test, which
+    # is the point of asserting on the plan rather than only on the result.
+    assert "chunks_text_fts" in plan
+    # And the stemming is doing real work: the corpus says "splits", the query says
+    # "splitting", and both reduce to the lexeme 'split'.
+    assert [ordinal for (ordinal,) in matches] == [1]
