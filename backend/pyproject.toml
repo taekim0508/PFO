@@ -9,7 +9,22 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "pydantic-settings>=2.0",
+    "sentence-transformers>=3.0",
+    # Listed directly only so the source below applies to it. sentence-transformers would
+    # pull it in anyway.
+    "torch>=2.2",
 ]
+
+# On Linux (CI and the production container), torch comes from PyTorch's CPU-only index.
+# The default PyPI wheel bundles CUDA libraries, gigabytes this project never uses because
+# the embedding model runs on CPU. macOS wheels are CPU-only already.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [project.scripts]
 pb = "portfolio_bot.cli:main"
@@ -43,6 +58,7 @@ asyncio_mode = "auto"
 addopts = "-q"
 markers = [
     "database: needs a running Postgres. Creates and drops a throwaway database.",
+    "model: downloads and runs the real embedding model. Skipped unless --run-model.",
 ]
 
 [tool.mypy]

@@ -123,6 +123,36 @@ Phase 1 is complete.
   database tests run in CI rather than skipping.
 - README carries the CI badge.
 
+**Corpus and ingestion (2.1, 2.2 to 2.5).**
+
+- `content/` holds the corpus: eight first-person markdown files (about, education,
+  skills and contact, the AI Producer internship, the lab research, Abroadly, FollowThru,
+  this chatbot). `content/README.md` describes the expected shape and is not ingested.
+- `ingest/loader.py` finds every `.md` under the content directory, requires front matter
+  with a `title`, and fingerprints each file with SHA-256 of its raw bytes. Bytes are
+  decoded without newline translation so character offsets stay true to the file.
+- `ingest/chunker.py` cuts at headings, then splits an oversized section at blank lines,
+  sentence ends, and finally a hard cut. Small pieces are packed back up to `chunk_size`,
+  with up to `chunk_overlap` characters repeated from a word boundary within a section.
+  Every chunk is exactly `text[char_start:char_end]` of the file and carries its heading
+  path. Code fences are never split at their blank lines or sentences.
+- `ingest/embedder.py` has the `Embedder` protocol, `SentenceTransformerEmbedder` (bge-small
+  at the pinned revision, unit-normalized, model loaded on first use) and `FakeEmbedder`.
+  Each chunk is embedded as `title > headings` followed by its text; the stored text is the
+  file's text alone.
+- `ingest/pipeline.py` writes each document in its own transaction and skips one whose hash
+  matches and whose embeddings all come from the current model. A file gone from disk
+  deletes its document by cascade. A broken file fails alone and keeps its stored version.
+- `pb ingest` with `--path`, `--force`, `--dry-run`; `make ingest` runs it. Exit code 1 if
+  any document failed.
+- On the real corpus: 8 documents, 76 chunks, 76 embeddings. Second run: 0 processed.
+  Editing one file re-processes exactly that file. Largest chunk 241 tokens, under the
+  model's 512.
+- `sentence-transformers` and `torch` added as runtime dependencies. On Linux, torch comes
+  from PyTorch's CPU-only index.
+- 123 tests, 1 skipped (the real-model test, which runs with `pytest --run-model` and was
+  run and passed). `make lint` clean.
+
 As things get built, one line each, grouped loosely by roadmap area. This is the section
 a fresh session actually needs, so write it for someone who has read nothing else.
 
@@ -156,7 +186,7 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D10 | The roadmap is an inventory, not a schedule | Fixed phase order and per-phase gates were the thing that made the previous setup unusable |
 | D11 | Backend Python is uv-managed 3.12, pinned in `backend/.python-version`, `uv.lock` committed | Leaves the system Python alone, and an application wants a reproducible lock |
 | D12 | Runtime dependencies are declared by the unit that first needs them; dev tooling declared up front | Keeps the dependency list an honest record of what the code actually imports |
-| D13 | `pb` uses stdlib argparse until 2.5 | The stack table names no CLI library, and 2.5 is where real flags first exist |
+| D13 | `pb` uses stdlib argparse | The stack table names no CLI library. Revisited at 2.5, where real flags arrived: three flags did not justify a dependency |
 | D14 | ruff at line length 100 with `E,F,I,UP,B,SIM`; mypy strict on `src`, relaxed on `tests` | One config in `pyproject.toml`, strict where the shipped code is |
 | D15 | Makefile stays compatible with GNU Make 3.81 | The version macOS ships, so nobody has to install a newer make to build this |
 | D16 | `MODEL_API_KEY` is required; local development sets it to a placeholder | Keeps 0.3's startup check, which is what stops a production deploy with no key. Ollama discards whatever it is sent |
@@ -178,6 +208,11 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D32 | Two kinds of test database: `empty_database` per test, `migrated_database` once per run | Migration tests must start from nothing, since applying migrations is what they test. Everything else wants the tables already there and does not want to pay for building them per test |
 | D33 | The `db` fixture rolls back unconditionally rather than relying on a connection's own rollback | A plain connection commits on success, so a *passing* test would be the one that leaves rows behind. Isolation cannot depend on the test failing |
 | D34 | Pool tests keep a database per test instead of sharing `migrated_database` | The pool opens its own connections, which sit outside the test's transaction, so nothing it writes would roll back |
+| D35 | Each chunk is embedded with its document title and heading path prepended; the stored text is the file's text alone | A mid-section chunk often never names its subject. Prepending context helps the vector without breaking the offsets citations depend on |
+| D36 | A document is re-processed when its hash changes or any of its embeddings came from a different model or revision | Changing the embedding model would otherwise leave old and new vectors side by side, and they are not comparable |
+| D37 | Chunking settings are not part of a file's fingerprint; changing them needs `pb ingest --force` | Folding them into the hash would make the stored hash stop meaning "the file's bytes" |
+| D38 | On Linux, torch installs from PyTorch's CPU-only index | The default wheel bundles gigabytes of CUDA libraries the CPU-only embedder never uses, in CI and in the production image |
+| D39 | The real embedding model is tested only under `pytest --run-model` | The default suite and CI never download a model; the one real-model test is run by hand when the embedder changes |
 
 ## Open items
 
@@ -194,6 +229,9 @@ things noticed while doing something else that would otherwise be lost.
 | `m` and `ef_construction` are pgvector's defaults, written out but never measured | 8.2, once there is a corpus to measure recall against |
 | The pool exposes live statistics (connections in use, waiters, wait time). Nothing surfaces them, and "the bot is slow" and "the pool is exhausted" look identical from outside | 5.x, on a health endpoint |
 | No statement timeout is configured on pooled connections, so one runaway query can hold a connection indefinitely | 5.x or 7.x, once there is real traffic |
+| Front matter `tags` are accepted and ignored. The schema has no column for them and nothing uses them yet | 3.x, if filtering by tag is ever wanted |
+| CI now installs torch. It has not run on GitHub yet, so its install time is unmeasured | First push of this branch |
+| `transformers` prints a "Loading weights" progress bar on model load, which logging settings do not silence | Cosmetic; 8.x |
 
 ## Findings
 

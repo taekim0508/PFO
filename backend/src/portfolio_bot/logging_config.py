@@ -67,6 +67,11 @@ def configure_logging(settings: Settings | None = None) -> None:
     root.addHandler(handler)
     root.setLevel(settings.log_level.upper())
 
+    # Loading the embedding model logs every HTTP request Hugging Face makes to check the
+    # pinned revision. Their warnings still come through.
+    for noisy in ("httpx", "sentence_transformers"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
 
 def get_logger(name: str) -> logging.Logger:
     """Every module gets its logger from here, so none of them configure anything."""

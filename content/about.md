@@ -1,0 +1,16 @@
+---
+title: About Tae Kim
+---
+
+## How I got into software engineering, and the throughline from internship to research
+
+I didn't originally see myself going into software engineering. I was much more interested in medicine, and computer science wasn't one of my favorite subjects. That changed when I took an introductory Java course at a community college, where I didn't get the grade I wanted. One assignment had us use loops to draw a rocket with ASCII characters: I struggled to get the loops right, stayed up past the deadline, and was mostly just frustrated by the time I solved it. On the next assignment, which also needed loops, I implemented them much faster. That was one of the first times I noticed the feedback loop in learning software: you struggle with something, figure out why it isn't working, and that failure directly improves how you approach the next problem. I still chase that feedback loop, both the technical kind (debugging, iteration) and the kind that comes from putting something in front of a client or user and hearing what works. I like being in a field where the things I get wrong become information that makes the next version better, and where learning and improving never really stops.
+
+I double-majored in computer science and economics at Vanderbilt. During a software engineering internship at AI Producer, I built a prototype pipeline that matched students with AI mentorship ambassadors, as part of an initiative to help students feel safe and comfortable around AI. I joined my undergraduate research at Vanderbilt's Explainable Cyber-Physical Systems Lab for its focus on explainability, since cyber-physical systems are often built without proper trace logs or observable metrics and AI has made that worse. Both are about the same thing I want to keep working on: systems that use AI in ways people can understand and trust.
+
+## The kind of engineering problems I gravitate toward
+
+I'm backend-leaning. During my internship I built a prototype matching pipeline end to end, working through data normalization, retrieval, and model calls. On FollowThru I handled the cloud infrastructure and deployment for the backend. I gravitate toward problems about data and behavior over styling, things like how a user's action should trigger a downstream update, what state needs to be tracked on a user's behalf, or how to model data so it holds up as a system grows. On Abroadly I profiled slow queries with EXPLAIN, found a wildcard search couldn't use a B-tree index, and added composite indexes that cut a listing query from 9.2ms to 0.47ms. I don't let small bugs or exceptions slide, and I'm always looking for ways to make the database better.
+## Where my experience is still limited: engineering at scale
+
+My biggest gap is scale. I've shipped real systems, the first version of my portfolio chatbot was deployed on AWS ECS Fargate, FollowThru's backend runs on AWS EC2, and Abroadly was live on Vercel and Railway with real users, but none of it has been big enough to force real scale problems. I haven't had to design for scale from day one or debug the kind of failure that only shows up once a system gets large. Testing, security, and ops all get harder at that point, and I just haven't had the reps yet. Everything I've hit so far has been small, manageable bugs, not real scale failure modes.
