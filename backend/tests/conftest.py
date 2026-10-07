@@ -34,6 +34,24 @@ from portfolio_bot.db.migrate import run_migrations
 from portfolio_bot.settings import get_settings
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-model",
+        action="store_true",
+        help="Run tests marked `model`, which download and run the real embedding model.",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip `model` tests unless asked for, so the default suite never downloads a model."""
+    if config.getoption("--run-model"):
+        return
+    skip = pytest.mark.skip(reason="needs the real embedding model; run with --run-model")
+    for item in items:
+        if "model" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture(autouse=True)
 def isolated_settings(request, monkeypatch):
     """Give every test the required settings, independent of the developer's .env.

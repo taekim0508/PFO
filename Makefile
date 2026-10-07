@@ -77,7 +77,7 @@ migrate:
 	cd $(BACKEND) && $(UV) run pb migrate
 
 ingest:
-	@echo "Nothing to do yet: the ingestion pipeline lands in roadmap item 2.5."
+	cd $(BACKEND) && $(UV) run pb ingest
 
 dev:
 	@echo "Nothing to do yet: the API lands in roadmap item 5.1, the frontend in 6.1."

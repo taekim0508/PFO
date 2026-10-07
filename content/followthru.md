@@ -1,0 +1,39 @@
+---
+title: FollowThru, AI-Assisted Habit Coach
+---
+
+## The problem FollowThru solves
+
+FollowThru is a native iOS habit-building app that combines personal tracking, AI-assisted planning, and social accountability. The core idea is turning a broad intention into a concrete, trackable routine: a user can create a habit manually or describe a goal conversationally, and the app turns that into a scheduled habit with binary completion (like meditate) or a numerical target (like read 20 pages), then tracks streaks and progress over time. Community features, friend requests, an activity feed, likes, and comments, add social accountability on top of individual tracking. I led the three-person team building it from January to June 2026. My own work was the backend, especially the AI chat experience that turns a freeform goal into an actionable habit, the cloud deployment, and most of the iOS client: I built the AI habit-coaching chat interface, the habit cards the chat produces, and the integration between the SwiftUI app and the deployed FastAPI backend. My teammates built the habit display, streaks, the analytics page, login and registration, and the community and friends features. The app was installed on physical iPhones through Xcode; it was not released on the App Store.
+
+## What I built: the stack and the contract between app and backend
+
+The iOS app is built in Swift and SwiftUI, using Combine for observable state and async/await over URLSession for networking, with a central AppState object that runs on the main actor so async network results can update the UI safely. The backend is Python with FastAPI, SQLModel and SQLAlchemy for data access, and Pydantic for validating both API inputs and structured AI outputs. AI functionality runs on the OpenAI API with GPT-4o-mini as the default model. I designed the schema-validated JSON contract between the app and the LLM pipeline: the backend owns the rules for what counts as a valid habit, and the app trusts whatever structured result the backend returns rather than trying to interpret raw model output itself.
+
+## Making a multi-turn LLM conversation reliable
+
+The main technical challenge was making a multi-turn LLM interaction reliable enough to build a real feature on. The chat needed to collect the user's activity, schedule, and experience level, handle off-topic or incomplete requests, and refuse or redirect sensitive requests, like something touching on medication management, before ever producing a structured habit. I approached this with layered guardrails: a hybrid of deterministic rules, keyword matching, and LLM-based classification and extraction on the input side, so the system could recognize an off-topic message, a missing piece of information, or a sensitive request and respond with a clarifying question or a redirect instead of pushing forward blindly.
+
+## Separating extraction from generation with prompt chaining
+
+On the generation side, I used prompt chaining to separate two different jobs. An early stage identifies the user's intent and updates a structured draft with whatever new information came in. Only once a confidence check determines there's enough information does a later stage use that draft to actually generate habit candidates. I also used few-shot prompting so plans would differ appropriately by experience level, though that came with a real cost: more examples in the prompt meant a larger prompt and higher cost per request, a tradeoff I had to weigh directly. On the output side, generated JSON is parsed and validated against Pydantic schemas and application rules, and when the model's plan doesn't pass, the validation errors are sent back to the model and it tries again, up to two retries. I didn't log how often retries happened, so I can describe the mechanism but not a retry rate. Hardening this integration was a large part of the work: output normalization and rule-based extraction fallbacks, each backed by regression tests, resolved bugs where valid-looking output failed validation, plan candidates were silently dropped, and the generation workflow stalled.
+
+## Keeping context across stateless model calls
+
+A separate problem was maintaining continuity across what are technically stateless model calls. A user might specify running on Monday, Wednesday, and Friday at 7 a.m., and then, several follow-up questions later, the chatbot could ask for those same details again or lose track of them entirely, because each call to the model has no memory of the ones before it on its own. I addressed this with explicit context management: every request carries a sliding window of recent messages plus the structured draft accumulated so far. The recent messages preserve the natural flow of conversation, while the draft holds onto important fields even after the messages that mentioned them have aged out of the window. That combination is what let the system feel continuous to the user even though the underlying model calls weren't.
+
+## How I deployed the backend
+
+I owned the deployment end to end. The backend runs on an AWS EC2 instance (Amazon Linux 2023) with a fixed public IP. nginx listens on port 80 and forwards requests to the FastAPI app, which systemd runs as a service with two uvicorn workers, restarting it if it crashes and applying basic hardening. A one-time setup script prepares a fresh server. Deploys are automatic: a push to main triggers a GitHub Actions workflow that connects to the server over SSH, pulls the code, reinstalls dependencies, restarts the service, and fails the deploy if the health check endpoint doesn't respond afterward. The weak spots are ones I'd fix before real users depended on it: there is no HTTPS, so the app talks to the server over plain HTTP at a raw IP address, and the database is SQLite on the server's own disk, which ties the whole app to that one machine and can't scale out to a second server.
+
+## Testing
+
+The backend has 150 automated tests, and I wrote 129 of them, covering the AI chat logic, the habit endpoints, the AI plan generator, and login and accounts. A teammate wrote the remaining 21. All of the tests cover the backend; the iOS app has no automated tests. The AI tests run against a mock model provider, so they check how the backend handles model output without calling the OpenAI API.
+
+## What I'd improve first: persistent memory across conversations
+
+The chatbot mostly understood only the current planning conversation. Existing habits were already stored in the database, but the chat workflow wasn't retrieving them, so the system had no way to notice that a new request overlapped with something the user already had going. My first improvement would be persistent user memory: storing conversation drafts and activity-specific preferences, then pulling in existing habits and relevant progress when building each request, so the chatbot could recognize existing routines, suggest updates, and flag conflicts instead of treating every conversation as a blank slate.
+
+## A fine-tuning experiment I'd want to run next
+
+Separately, I'd evaluate supervised fine-tuning of an open-weight model with LoRA for FollowThru's AI planning, using reviewed examples to teach more consistent intent classification, clarification behavior, and experience-conditioned habit planning. The hypothesis is better personalization without repeating so many examples in every prompt, since few-shot prompting already showed that more examples means a larger, more expensive prompt. I'd keep the database-backed memory, deterministic checks, and output validation regardless of that experiment, and evaluate it on held-out conversations, measuring duplicate suggestions, missed conflicts, personalization quality, inappropriate responses, and cost per successfully created habit.

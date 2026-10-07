@@ -15,7 +15,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # The .env lives at the repository root. Resolving it from this file rather than from the
 # working directory is what lets `pb` run from backend/ and `make ingest` run from the
 # repository root and still read the same file.
-ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILE = REPO_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -47,6 +48,13 @@ class Settings(BaseSettings):
     # silently alter the vectors already stored in the database.
     embedding_model_name: str = "BAAI/bge-small-en-v1.5"
     embedding_model_revision: str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+    # How many texts go through the model at once. Larger batches are faster up to the
+    # point where they stop fitting in memory; 32 is comfortable on a laptop CPU.
+    embedding_batch_size: int = 32
+
+    # Corpus. The directory `pb ingest` mirrors into the database. Resolved from this file
+    # for the same reason as ENV_FILE, so it does not depend on the working directory.
+    content_dir: Path = REPO_ROOT / "content"
 
     # Chunking, measured in characters, because the chunker splits on characters and
     # stores character offsets. bge-small truncates its input at 512 tokens, roughly
