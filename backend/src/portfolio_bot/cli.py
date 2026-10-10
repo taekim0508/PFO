@@ -17,6 +17,8 @@ from pydantic import ValidationError
 from portfolio_bot import __version__
 from portfolio_bot.db.migrate import MigrationError, run_migrations
 from portfolio_bot.db.pool import close_pool, connection
+from portfolio_bot.evaluation.questions import EvalQuestion, EvalSetError, load_questions
+from portfolio_bot.evaluation.runner import EvalReport, check_sections, evaluate, known_sections
 from portfolio_bot.ingest.embedder import Embedder, SentenceTransformerEmbedder
 from portfolio_bot.ingest.pipeline import IngestReport, ingest
 from portfolio_bot.logging_config import configure_logging, get_logger
@@ -30,7 +32,6 @@ SNIPPET_WIDTH = 100
 # Subcommand name -> (description, roadmap item that implements it).
 PLANNED_COMMANDS: dict[str, tuple[str, str]] = {
     "ask": ("Answer a question from retrieved context", "4.5"),
-    "eval": ("Measure retrieval quality against the eval set", "3.6"),
 }
 
 
@@ -79,6 +80,24 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=None,
         help="How many chunks to return (default: TOP_K)",
+    )
+
+    eval_parser = subparsers.add_parser(
+        "eval", help="Measure retrieval quality against the evaluation set"
+    )
+    eval_commands = eval_parser.add_subparsers(dest="eval_command", metavar="eval_command")
+    eval_run = eval_commands.add_parser("run", help="Score one strategy, question by question")
+    eval_run.add_argument("--strategy", choices=STRATEGY_NAMES, required=True)
+    eval_compare = eval_commands.add_parser("compare", help="Score every strategy in one table")
+    for eval_command in (eval_run, eval_compare):
+        eval_command.add_argument(
+            "--k", type=_positive_int, default=None, help="Cutoff (default: TOP_K)"
+        )
+        eval_command.add_argument(
+            "--file", type=Path, default=None, help="Evaluation set (default: EVAL_SET_PATH)"
+        )
+    eval_commands.add_parser(
+        "sections", help="List every section, in the form the evaluation set expects"
     )
 
     for name, (description, item) in PLANNED_COMMANDS.items():
@@ -224,17 +243,25 @@ def command_search(
     if not results:
         print("No results. Has the corpus been ingested? Try 'pb ingest'.")
         return 0
-    for result in results:
+    for rank, result in enumerate(results, start=1):
         print()
-        _print_result(result)
+        _print_result(rank, result, strategy.name)
     return 0
 
 
-def _print_result(result: ScoredChunk) -> None:
-    rank = result.provenance[0].rank
+def _print_result(rank: int, result: ScoredChunk, strategy: str) -> None:
+    """Rank, score, and location, then the first line of prose underneath.
+
+    The rank is the position in this list. When the result came from other strategies, as a
+    fused one does, the rank each of them gave it is printed after the location, so a chunk
+    only one arm found is as visible as one both did.
+    """
     location = " > ".join([result.chunk.title, *result.chunk.heading_path])
-    print(f"{rank:>3}  {result.score:.3f}  {location}")
-    print(f"{'':>3}  {'':>5}  {_first_line(result.chunk.text)}")
+    line = f"{rank:>3}  {result.score:.4f}  {location}"
+    if any(p.strategy != strategy for p in result.provenance):
+        line += "  [" + ", ".join(f"{p.strategy} {p.rank}" for p in result.provenance) + "]"
+    print(line)
+    print(f"{'':>3}  {'':>6}  {_first_line(result.chunk.text)}")
 
 
 def _first_line(text: str) -> str:
@@ -244,6 +271,95 @@ def _first_line(text: str) -> str:
     if len(line) > SNIPPET_WIDTH:
         return line[: SNIPPET_WIDTH - 3] + "..."
     return line
+
+
+def command_eval(
+    settings: Settings, args: argparse.Namespace, embedder: Embedder | None = None
+) -> int:
+    """Run `pb eval run`, `compare`, or `sections`.
+
+    `embedder` is for tests, which pass a fake so nothing downloads a model.
+
+    Returns 1 when the file is missing or malformed, names a section the corpus does not
+    have, or the database is unreachable.
+    """
+    if args.eval_command is None:
+        print("usage: pb eval {run,compare,sections}. See 'pb eval --help'.", file=sys.stderr)
+        return 2
+
+    questions: list[EvalQuestion] = []
+    if args.eval_command != "sections":
+        path: Path = args.file if args.file is not None else settings.eval_set_path
+        if not path.is_file():
+            print(f"Evaluation set not found: {path}", file=sys.stderr)
+            return 1
+        try:
+            questions = load_questions(path)
+        except EvalSetError as error:
+            print(f"Problems in {path}:\n{error}", file=sys.stderr)
+            return 1
+        if not questions:
+            print(f"No questions yet. Add some to {path}.", file=sys.stderr)
+            return 1
+    if embedder is None:
+        embedder = _build_embedder(settings)
+
+    try:
+        with connection() as conn:
+            known = known_sections(conn)
+            if args.eval_command == "sections":
+                for section in sorted(known):
+                    print(section)
+                return 0
+            check_sections(questions, known)
+            k: int = args.k if args.k is not None else settings.top_k
+            names = [args.strategy] if args.eval_command == "run" else list(STRATEGY_NAMES)
+            reports = [
+                evaluate(build_strategy(name, conn, embedder, settings), questions, k)
+                for name in names
+            ]
+    except psycopg.OperationalError as error:
+        print("Cannot reach the database. Is it running? Try 'make db-up'.", file=sys.stderr)
+        print(f"  {error}", file=sys.stderr)
+        return 1
+    except EvalSetError as error:
+        print(f"Problems in the evaluation set:\n{error}", file=sys.stderr)
+        return 1
+    finally:
+        close_pool()
+
+    if args.eval_command == "run":
+        _print_eval_run(reports[0])
+    else:
+        _print_eval_compare(reports)
+    return 0
+
+
+def _print_eval_run(report: EvalReport) -> None:
+    print(f"{report.strategy}, k={report.k}, {len(report.results)} questions")
+    print()
+    for result in report.results:
+        hit = f"rank {result.first_hit}" if result.first_hit else "miss"
+        print(f"  {hit:<7}  {result.question.question}")
+    print()
+    k = report.k
+    print(
+        f"recall@{k} {report.recall:.3f}   MRR {report.mrr:.3f}   "
+        f"precision@{k} {report.precision:.3f}"
+    )
+
+
+def _print_eval_compare(reports: list[EvalReport]) -> None:
+    k = reports[0].k
+    print(f"k={k}, {len(reports[0].results)} questions")
+    print()
+    headers = ("strategy", f"recall@{k}", "MRR", f"precision@{k}")
+    print(f"{headers[0]:<10}{headers[1]:>12}{headers[2]:>8}{headers[3]:>15}")
+    for report in reports:
+        print(
+            f"{report.strategy:<10}{report.recall:>12.3f}{report.mrr:>8.3f}"
+            f"{report.precision:>15.3f}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -282,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_ingest(settings, args)
     if args.command == "search":
         return command_search(settings, args)
+    if args.command == "eval":
+        return command_eval(settings, args)
 
     description, item = PLANNED_COMMANDS[args.command]
     print(f"pb {args.command}: not implemented yet.")

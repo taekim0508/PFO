@@ -9,10 +9,11 @@ from __future__ import annotations
 from portfolio_bot.ingest.embedder import Embedder
 from portfolio_bot.retrieval.base import RetrievalStrategy
 from portfolio_bot.retrieval.dense import Connection, DenseRetriever
+from portfolio_bot.retrieval.hybrid import HybridRetriever
 from portfolio_bot.retrieval.lexical import LexicalRetriever
 from portfolio_bot.settings import Settings
 
-STRATEGY_NAMES = ("dense", "lexical")
+STRATEGY_NAMES = ("dense", "lexical", "hybrid")
 
 
 def build_strategy(
@@ -27,4 +28,13 @@ def build_strategy(
         return DenseRetriever(conn, embedder, ef_search=settings.hnsw_ef_search)
     if name == "lexical":
         return LexicalRetriever(conn)
+    if name == "hybrid":
+        return HybridRetriever(
+            [
+                build_strategy("dense", conn, embedder, settings),
+                build_strategy("lexical", conn, embedder, settings),
+            ],
+            rrf_k=settings.rrf_k,
+            candidate_depth=settings.hybrid_candidate_depth,
+        )
     raise ValueError(f"unknown retrieval strategy {name!r}; expected one of {STRATEGY_NAMES}")

@@ -183,6 +183,37 @@ Phase 1 is complete.
   verified red by respelling the indexed expression.
 - 164 tests, 2 skipped (`--run-model`). `make lint` clean.
 
+**Retrieval (3.4, hybrid part of 3.5).**
+
+- `retrieval/hybrid.py` has `reciprocal_rank_fusion(lists, rrf_k)`, a pure function, and
+  `HybridRetriever(strategies, rrf_k=..., candidate_depth=...)`, which asks each strategy
+  for `max(candidate_depth, k)` results, fuses them, and returns the top k. Provenance on
+  a fused result carries every contributing strategy's own rank.
+- The factory builds `hybrid` from dense and lexical. `HYBRID_CANDIDATE_DEPTH` (20) added
+  to settings; `RRF_K` (60) was already there.
+- `pb search` prints the rank as the position in its own list, scores to 4 decimals, and
+  for hybrid each arm's rank after the location, e.g. `[dense 8, lexical 1]`.
+- Fusion arithmetic is tested on hand-built lists against sums written out by hand.
+- 184 tests, 2 skipped (`--run-model`). `make lint` clean.
+
+Retrieval 3.1 to 3.5 are built. 3.6, the evaluation harness, is what says which is best.
+
+**Retrieval evaluation (3.6, harness only).**
+
+- `eval/retrieval.yaml` is the question set: each entry a `question`, one or more
+  `expected` sections (`education.md > Degrees and dates`), and an optional `note`. It
+  holds the format and no questions; Tae writes those.
+- `evaluation/questions.py` loads and checks it, reporting every problem at once by entry.
+  `evaluation/metrics.py` has `recall_at_k`, `reciprocal_rank`, `precision_at_k`, pure
+  functions over sections. `evaluation/runner.py` refuses an expected section no stored
+  chunk lies under, then scores a strategy question by question.
+- `pb eval run --strategy NAME [--k N] [--file F]` prints the first-hit rank or `miss` per
+  question, then the averages. `pb eval compare` prints one row per strategy. `pb eval
+  sections` lists every section in the form the file takes.
+- PyYAML added as a runtime dependency, `types-pyyaml` as a dev one. `EVAL_SET_PATH` in
+  settings. `eval/` added to the CLAUDE.md layout.
+- 213 tests, 2 skipped (`--run-model`). `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -190,7 +221,7 @@ is not a problem to solve, it is a thing that was set down.
 
 | Item | Where it stopped | Branch |
 |---|---|---|
-| none | | |
+| Retrieval evaluation (3.6) | Harness built. Waiting for Tae's 30 to 50 questions in `eval/retrieval.yaml`, then `pb eval compare` and the result into Findings | `retrieval-eval` |
 
 ## Decisions
 
@@ -247,6 +278,10 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D44 | Lexical search matches any of the question's lexemes, not all of them | Requiring all returned nothing for five of five realistic questions on the real corpus (see Findings) |
 | D45 | Strategies are built by name in one factory | `pb search`, 3.6, and the API choose strategies from strings; one mapping keeps them from drifting apart |
 | D46 | Dense and lexical each search the whole corpus independently; fusion merges their lists rather than one filtering for the other | A filter can only drop chunks. On the real corpus each arm misses chunks the other finds, so either must be able to rescue one |
+| D47 | Hybrid asks each arm for `max(HYBRID_CANDIDATE_DEPTH, k)` results, default 20, before fusing | Asking each for only k drops a chunk ranked just below the cut in one list before the other can lift it |
+| D48 | Equal fused scores are broken by chunk id | Symmetric ranks (1st and 2nd against 2nd and 1st) tie exactly; any fixed rule beats an order that varies by run. Note it is arbitrary, not a judgment of which chunk is better |
+| D49 | Eval answers are sections, not chunks, and a section covers everything beneath it | Chunk ids change on every ingest, and chunk size is one of the things 3.6 exists to compare; a section survives both |
+| D50 | precision@k divides by k, not by how many results came back | A strategy returning two chunks for k=5 should not get perfect precision for getting both right |
 
 ## Open items
 
@@ -350,3 +385,17 @@ appeared in both lists. "What degree did Tae get?": Education 5th. Fusion reward
 agreement, and here the two arms agreed on noise. Three questions are an anecdote, not a
 measurement; this is the case for writing the 3.6 question set, with questions naming Tae
 on purpose, before judging hybrid or any fix for the name.
+
+**2026-10-10, hybrid in code matches the preview, and ties decide a top result.** `pb
+search --strategy hybrid` gives the same rankings as the preview script above, so that
+finding stands for the real implementation. New: "Did Tae go to Vanderbilt?" ties exactly
+at 1st between `About Tae Kim` (dense 1, lexical 2) and `Education > Degrees and dates`
+(dense 2, lexical 1), and D48's chunk-id rule puts About first. A rank-only fusion of two
+arms produces exact ties whenever ranks mirror each other, so the order of the top answer
+can rest on an arbitrary rule. Another number for 3.6, alongside BM25 and the name problem.
+
+**2026-10-10, a red check can pass against stale bytecode.** Breaking `hybrid.py` with a
+same-length edit, then restoring it within the same second, left Python's cached bytecode
+looking current (it compares modification time and size), so the suite kept running the
+broken version after the restore. Clear `__pycache__` after restoring a source file, or a
+red check can produce false reds and, worse, false greens.

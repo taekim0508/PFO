@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     # for the same reason as ENV_FILE, so it does not depend on the working directory.
     content_dir: Path = REPO_ROOT / "content"
 
+    # The hand-written evaluation set `pb eval` scores strategies against.
+    eval_set_path: Path = REPO_ROOT / "eval" / "retrieval.yaml"
+
     # Chunking, measured in characters, because the chunker splits on characters and
     # stores character offsets. bge-small truncates its input at 512 tokens, roughly
     # 2000 characters, so 1000 leaves room for the heading path prepended at ingest.
@@ -73,7 +76,12 @@ class Settings(BaseSettings):
     # It also caps how many rows the index can return, so the dense retriever raises it to
     # k when k is larger. 40 is pgvector's own default, written out so it is visible.
     hnsw_ef_search: int = 40
+    # Reciprocal rank fusion gives a chunk 1 / (rrf_k + rank) from every list it appears
+    # in. A larger rrf_k flattens the curve, so first place counts for less over fifth.
     rrf_k: int = 60
+    # How many results hybrid asks each strategy for before fusing them. Deeper than top_k,
+    # so a chunk one arm ranks 8th can still be lifted by the other.
+    hybrid_candidate_depth: int = 20
 
     # Generation. These three are what make the model layer provider-agnostic: Ollama,
     # Together, Groq, and Fireworks all speak the same shape, so switching is config.

@@ -85,7 +85,7 @@ def test_finds_and_prints_an_ingested_chunk(search_database, tmp_path, capsys):
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].startswith("dense, k=3: ")
-    assert lines[2].split() == ["1", "1.000", "Abroadly", ">", "Search"]
+    assert lines[2].split() == ["1", "1.0000", "Abroadly", ">", "Search"]
     assert lines[3].strip() == "I built the search index."
 
 
@@ -102,3 +102,55 @@ def test_searches_by_keyword_with_the_lexical_strategy(search_database, tmp_path
     assert lines[2].split()[0] == "1"
     assert lines[2].split()[2:] == ["Abroadly", ">", "Search"]
     assert lines[3].strip() == "I built the search index."
+
+
+@pytest.mark.database
+def test_hybrid_prints_its_own_rank_and_each_strategys(search_database, tmp_path, capsys):
+    (tmp_path / "abroadly.md").write_text(DOCUMENT)
+    with psycopg.connect(search_database, row_factory=dict_row) as conn:
+        ingest(conn, tmp_path, FakeEmbedder(), chunk_size=1000, chunk_overlap=0)
+    document = read_document(tmp_path, tmp_path / "abroadly.md")
+    [chunk] = chunk_document(document.text, document.body_start, 1000, 0)
+    query = embedding_text(document.title, chunk)
+
+    assert search(get_settings(), [query, "--strategy", "hybrid"]) == 0
+
+    # Found first by both arms: 1/61 + 1/61.
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("hybrid, k=5: ")
+    assert lines[2].split() == [
+        "1",
+        "0.0328",
+        "Abroadly",
+        ">",
+        "Search",
+        "[dense",
+        "1,",
+        "lexical",
+        "1]",
+    ]
+
+
+@pytest.mark.database
+def test_hybrid_names_the_one_arm_behind_a_single_strategy_result(
+    search_database, tmp_path, capsys
+):
+    (tmp_path / "abroadly.md").write_text(DOCUMENT)
+    with psycopg.connect(search_database, row_factory=dict_row) as conn:
+        ingest(conn, tmp_path, FakeEmbedder(), chunk_size=1000, chunk_overlap=0)
+
+    # "zebra" matches no word, so only dense finds the chunk.
+    assert search(get_settings(), ["zebra", "--strategy", "hybrid"]) == 0
+
+    assert capsys.readouterr().out.splitlines()[2].endswith("[dense 1]")
+
+
+@pytest.mark.database
+def test_a_single_strategy_does_not_repeat_its_own_rank(search_database, tmp_path, capsys):
+    (tmp_path / "abroadly.md").write_text(DOCUMENT)
+    with psycopg.connect(search_database, row_factory=dict_row) as conn:
+        ingest(conn, tmp_path, FakeEmbedder(), chunk_size=1000, chunk_overlap=0)
+
+    assert search(get_settings(), ["index", "--strategy", "lexical"]) == 0
+
+    assert "[" not in capsys.readouterr().out.splitlines()[2]

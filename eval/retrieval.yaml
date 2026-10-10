@@ -1,0 +1,22 @@
+# The retrieval evaluation set: questions, and the sections of content/ that answer them.
+#
+# `pb eval run --strategy dense|lexical|hybrid` scores one strategy question by question.
+# `pb eval compare` scores all of them in one table. `pb eval sections` lists every
+# section that exists, in exactly the form `expected` takes.
+#
+# Each entry:
+#
+#   - question: Where did Tae go to school?
+#     expected:
+#       - education.md > Degrees and dates
+#     note: names Tae on purpose          # optional, why the entry is here
+#
+# `expected` names one or more sections, never chunks: chunk ids change on every ingest,
+# and a section survives a change to chunk size. A section covers everything beneath it,
+# so `education.md` alone means any chunk of that file.
+#
+# Write questions the way a visitor would ask them, including ones that use Tae's name.
+# A question no section answers cannot be scored here; leave those for the generation
+# evaluation.
+
+questions: []
