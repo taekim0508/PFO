@@ -20,11 +20,17 @@ from portfolio_bot.db.pool import close_pool, connection
 from portfolio_bot.ingest.embedder import Embedder, SentenceTransformerEmbedder
 from portfolio_bot.ingest.pipeline import IngestReport, ingest
 from portfolio_bot.logging_config import configure_logging, get_logger
+from portfolio_bot.retrieval.base import RetrievalStrategy, ScoredChunk
+from portfolio_bot.retrieval.dense import DenseRetriever
 from portfolio_bot.settings import Settings, get_settings
+
+# Strategies `pb search --strategy` accepts. Lexical and hybrid join as they are built.
+SEARCH_STRATEGIES = ("dense",)
+# How much of a chunk's first line `pb search` shows, in characters.
+SNIPPET_WIDTH = 100
 
 # Subcommand name -> (description, roadmap item that implements it).
 PLANNED_COMMANDS: dict[str, tuple[str, str]] = {
-    "search": ("Retrieve ranked chunks for a query", "3.5"),
     "ask": ("Answer a question from retrieved context", "4.5"),
     "eval": ("Measure retrieval quality against the eval set", "3.6"),
 }
@@ -61,10 +67,42 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report what would change without embedding or writing anything",
     )
+
+    search_parser = subparsers.add_parser("search", help="Retrieve ranked chunks for a query")
+    search_parser.add_argument("query", help="The question to search for")
+    search_parser.add_argument(
+        "--strategy",
+        choices=SEARCH_STRATEGIES,
+        default="dense",
+        help="How to rank chunks (default: dense)",
+    )
+    search_parser.add_argument(
+        "--k",
+        type=_positive_int,
+        default=None,
+        help="How many chunks to return (default: TOP_K)",
+    )
+
     for name, (description, item) in PLANNED_COMMANDS.items():
         subparsers.add_parser(name, help=f"{description} (roadmap {item})")
 
     return parser
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {number}")
+    return number
+
+
+def _build_embedder(settings: Settings) -> SentenceTransformerEmbedder:
+    return SentenceTransformerEmbedder(
+        settings.embedding_model_name,
+        settings.embedding_model_revision,
+        settings.embedding_batch_size,
+        query_instruction=settings.embedding_query_instruction,
+    )
 
 
 def command_migrate(settings: Settings) -> int:
@@ -110,11 +148,7 @@ def command_ingest(
         return 1
 
     if embedder is None:
-        embedder = SentenceTransformerEmbedder(
-            settings.embedding_model_name,
-            settings.embedding_model_revision,
-            settings.embedding_batch_size,
-        )
+        embedder = _build_embedder(settings)
 
     try:
         with connection() as conn:
@@ -158,6 +192,64 @@ def _print_ingest_report(report: IngestReport, *, dry_run: bool) -> None:
         print(f"chunks: {report.chunks_written} written, {report.chunks_embedded} embedded")
 
 
+def command_search(
+    settings: Settings, args: argparse.Namespace, embedder: Embedder | None = None
+) -> int:
+    """Print the chunks a strategy ranks highest for a query.
+
+    `embedder` is for tests, which pass a fake so nothing downloads a model.
+
+    Returns 2 for a blank query, matching argparse's code for bad input, and 1 when the
+    database is unreachable.
+    """
+    query: str = args.query.strip()
+    if not query:
+        print("The query is empty.", file=sys.stderr)
+        return 2
+    k: int = args.k if args.k is not None else settings.top_k
+    if embedder is None:
+        embedder = _build_embedder(settings)
+
+    try:
+        with connection() as conn:
+            strategy: RetrievalStrategy = DenseRetriever(
+                conn, embedder, ef_search=settings.hnsw_ef_search
+            )
+            results = strategy.retrieve(query, k)
+    except psycopg.OperationalError as error:
+        print("Cannot reach the database. Is it running? Try 'make db-up'.", file=sys.stderr)
+        print(f"  {error}", file=sys.stderr)
+        return 1
+    finally:
+        close_pool()
+
+    # Collapsed to one line, so a pasted multi-line query cannot push the results around.
+    print(f'{strategy.name}, k={k}: "{" ".join(query.split())}"')
+    if not results:
+        print("No results. Has the corpus been ingested? Try 'pb ingest'.")
+        return 0
+    for result in results:
+        print()
+        _print_result(result)
+    return 0
+
+
+def _print_result(result: ScoredChunk) -> None:
+    rank = result.provenance[0].rank
+    location = " > ".join([result.chunk.title, *result.chunk.heading_path])
+    print(f"{rank:>3}  {result.score:.3f}  {location}")
+    print(f"{'':>3}  {'':>5}  {_first_line(result.chunk.text)}")
+
+
+def _first_line(text: str) -> str:
+    """The chunk's first line of prose. Heading lines repeat the path printed above it."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    line = next((line for line in lines if not line.startswith("#")), lines[0] if lines else "")
+    if len(line) > SNIPPET_WIDTH:
+        return line[: SNIPPET_WIDTH - 3] + "..."
+    return line
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code.
 
@@ -192,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_migrate(settings)
     if args.command == "ingest":
         return command_ingest(settings, args)
+    if args.command == "search":
+        return command_search(settings, args)
 
     description, item = PLANNED_COMMANDS[args.command]
     print(f"pb {args.command}: not implemented yet.")

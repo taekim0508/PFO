@@ -19,6 +19,7 @@ that settles the question.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -73,6 +74,21 @@ def isolated_settings(request, monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def restore_logging():
+    """Put the root logger back the way it was after every test.
+
+    `main()` configures logging, which installs a handler on whatever sys.stderr is at the
+    time. Under pytest that is the current test's capture stream, closed once the test
+    ends, so without this every later test that logs writes into a closed file.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
 
 
 @contextmanager

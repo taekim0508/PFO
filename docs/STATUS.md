@@ -153,8 +153,23 @@ Phase 1 is complete.
 - 123 tests, 1 skipped (the real-model test, which runs with `pytest --run-model` and was
   run and passed). `make lint` clean.
 
-As things get built, one line each, grouped loosely by roadmap area. This is the section
-a fresh session actually needs, so write it for someone who has read nothing else.
+**Retrieval (3.1, 3.2, dense part of 3.5).**
+
+- `retrieval/base.py` defines `RetrievalStrategy` (`name`, `retrieve(query, k)`), and
+  `ScoredChunk`: a `RetrievedChunk` (text, document, heading path, offsets), a score, and
+  a tuple of `Provenance(strategy, rank)` so fusion can record every contributing strategy.
+- `retrieval/dense.py` has `DenseRetriever(conn, embedder, ef_search=...)`. It embeds the
+  question with `embed_query`, which adds bge's query instruction, then orders by cosine
+  distance and scores `1 - distance`. `hnsw.ef_search` is set per transaction. Only
+  vectors from the embedder's own model and revision are ranked; others are skipped with a
+  warning naming how many and which model.
+- `Embedder.embed_query` added to the protocol and both embedders. `vector_literal` moved
+  to `db/vector.py`, shared by ingest and retrieval.
+- `pb search "query" [--strategy dense] [--k N]` prints rank, score, `title > headings`,
+  and the chunk's first line of prose. `dense` is the only strategy so far.
+- A conftest fixture restores the root logger after every test. `main()` was leaving a
+  handler on a closed capture stream, which surfaced once a later test file logged.
+- 146 tests, 2 skipped (both `--run-model`, run by hand and passing). `make lint` clean.
 
 ## In progress
 
@@ -163,7 +178,7 @@ is not a problem to solve, it is a thing that was set down.
 
 | Item | Where it stopped | Branch |
 |---|---|---|
-| none yet | | |
+| none | | |
 
 ## Decisions
 
@@ -213,6 +228,10 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D37 | Chunking settings are not part of a file's fingerprint; changing them needs `pb ingest --force` | Folding them into the hash would make the stored hash stop meaning "the file's bytes" |
 | D38 | On Linux, torch installs from PyTorch's CPU-only index | The default wheel bundles gigabytes of CUDA libraries the CPU-only embedder never uses, in CI and in the production image |
 | D39 | The real embedding model is tested only under `pytest --run-model` | The default suite and CI never download a model; the one real-model test is run by hand when the embedder changes |
+| D40 | Questions are embedded with bge's query instruction in front; chunks are not | The model was trained that way for short-question-to-passage search. It is a setting (`EMBEDDING_QUERY_INSTRUCTION`), so 3.6 can measure with and without |
+| D41 | Dense search ranks only vectors from the running embedder's model and revision, and logs a warning naming any it skipped | Vectors from two models are not comparable; a missing chunk is visible and fixable, a chunk ranked on a meaningless score is neither |
+| D42 | The effective `hnsw.ef_search` is the larger of the setting and k, capped at pgvector's 1000, and local to the query's transaction | The index cannot return more rows than its shortlist, so a smaller value would cut results short without error; transaction-local keeps it off later queries on a pooled connection |
+| D43 | `ScoredChunk.provenance` is a tuple of `(strategy, rank)` | Fusion in 3.4 can record every strategy behind a result without changing the type |
 
 ## Open items
 
@@ -230,8 +249,10 @@ things noticed while doing something else that would otherwise be lost.
 | The pool exposes live statistics (connections in use, waiters, wait time). Nothing surfaces them, and "the bot is slow" and "the pool is exhausted" look identical from outside | 5.x, on a health endpoint |
 | No statement timeout is configured on pooled connections, so one runaway query can hold a connection indefinitely | 5.x or 7.x, once there is real traffic |
 | Front matter `tags` are accepted and ignored. The schema has no column for them and nothing uses them yet | 3.x, if filtering by tag is ever wanted |
-| CI now installs torch. It has not run on GitHub yet, so its install time is unmeasured | First push of this branch |
 | `transformers` prints a "Loading weights" progress bar on model load, which logging settings do not silence | Cosmetic; 8.x |
+| The pool's "opened" and "closed" INFO lines print around every `pb search` result | Cosmetic; 8.x |
+| The other-model check reads every row of `chunk_embeddings` on every search. Free at 76 rows, not at a much larger corpus | Move to once per process or into ingest if the corpus grows |
+| A question naming Tae is pulled toward `about.md`, whose title "About Tae Kim" is embedded with every chunk (see Findings) | 3.3 and 3.6 first; then D35 or the corpus titles, if the numbers say so |
 
 ## Findings
 
@@ -283,3 +304,12 @@ identical to one that works, until a test reads a row it did not write. Replacin
 test had written. Note which direction that breaks in: with a plain transaction the earlier
 test still passed, because its write is invisible to other connections while uncommitted.
 It is the *passing* test that commits and pollutes. Reverted after.
+
+**2026-10-09, a name in the question outweighs its subject.** On the real corpus, "Where did
+Tae go to school?" ranks `about.md` chunks 1 to 5, with `Education > Degrees and dates`
+8th. "Where did he go to school?" ranks that chunk 1st. "Tae's university and degree" also
+misses it. Every `about.md` chunk is embedded with "About Tae Kim" in front (D35), so the
+name in a question matches the title rather than the topic. Questions naming Tae are the
+common case for this bot. Not fixed here: the lexical arm (3.3) should find "Vanderbilt" and
+"degree" directly, and 3.6 is where the size of the effect gets measured. CI's first run
+with torch (PR 8) took 1m26s in total, closing the open item on install time.

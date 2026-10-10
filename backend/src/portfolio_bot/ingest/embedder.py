@@ -37,7 +37,11 @@ class Embedder(Protocol):
     def model_revision(self) -> str: ...
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """One unit-length vector per text, in order."""
+        """One unit-length vector per text, in order. For chunks, at ingest."""
+        ...
+
+    def embed_query(self, text: str) -> list[float]:
+        """One unit-length vector for a question, comparable with the chunks' vectors."""
         ...
 
     def count_tokens(self, texts: list[str]) -> list[int]:
@@ -50,12 +54,25 @@ class SentenceTransformerEmbedder:
 
     The model is loaded on first use rather than at construction, so building an embedder
     for a run that turns out to have nothing to embed costs nothing.
+
+    `query_instruction` is put in front of a question, and never in front of a chunk,
+    before embedding it. bge was trained on (question, passage that answers it) pairs in
+    which only the question carried this sentence, and it learned to place a prefixed
+    question near its answer rather than near other short questions. Empty means none.
     """
 
-    def __init__(self, model_name: str, model_revision: str, batch_size: int) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        model_revision: str,
+        batch_size: int,
+        *,
+        query_instruction: str = "",
+    ) -> None:
         self._model_name = model_name
         self._model_revision = model_revision
         self._batch_size = batch_size
+        self._query_instruction = query_instruction
         self._model: SentenceTransformer | None = None
 
     @property
@@ -93,6 +110,9 @@ class SentenceTransformerEmbedder:
         )
         return [[float(value) for value in vector] for vector in vectors]
 
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed([self._query_instruction + text])[0]
+
     def count_tokens(self, texts: list[str]) -> list[int]:
         tokenizer = self._load().tokenizer
         return [len(ids) for ids in tokenizer(texts, truncation=False)["input_ids"]]
@@ -119,6 +139,11 @@ class FakeEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [_hash_vector(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        # No instruction, so a test can find a chunk by querying with exactly the text that
+        # chunk was embedded from.
+        return _hash_vector(text)
 
     def count_tokens(self, texts: list[str]) -> list[int]:
         return [len(text.split()) for text in texts]

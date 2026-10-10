@@ -35,6 +35,13 @@ def test_fake_vectors_are_deterministic_and_differ_by_text():
     assert first != other
 
 
+def test_fake_embeds_a_query_exactly_as_it_embeds_the_same_text():
+    embedder = FakeEmbedder()
+
+    assert embedder.embed_query("same") == embedder.embed(["same"])[0]
+    assert embedder.embed_query("same") != embedder.embed_query("different")
+
+
 def test_fake_counts_words_as_tokens():
     assert FakeEmbedder().count_tokens(["a b c", ""]) == [3, 0]
 
@@ -64,3 +71,27 @@ def test_real_model_produces_unit_vectors_that_reflect_meaning():
     assert math.isclose(norm(query), 1.0, rel_tol=1e-5)
     assert dot(query, related) > dot(query, unrelated)
     assert embedder.count_tokens(["hello world"])[0] > 0
+
+
+@pytest.mark.model
+def test_real_model_embeds_a_query_with_its_instruction():
+    settings = get_settings()
+    embedder = SentenceTransformerEmbedder(
+        settings.embedding_model_name,
+        settings.embedding_model_revision,
+        batch_size=8,
+        query_instruction=settings.embedding_query_instruction,
+    )
+    question = "What did Tae build for Abroadly?"
+    query = embedder.embed_query(question)
+    related, unrelated = embedder.embed(
+        [
+            "Abroadly > Search\n\nI built the search index students use to find programs.",
+            "Education\n\nI studied computer science.",
+        ]
+    )
+
+    assert math.isclose(norm(query), 1.0, rel_tol=1e-5)
+    # The instruction changes the vector, so the question is not embedded as plain text.
+    assert query != embedder.embed([question])[0]
+    assert dot(query, related) > dot(query, unrelated)
