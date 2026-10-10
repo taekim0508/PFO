@@ -87,3 +87,18 @@ def test_finds_and_prints_an_ingested_chunk(search_database, tmp_path, capsys):
     assert lines[0].startswith("dense, k=3: ")
     assert lines[2].split() == ["1", "1.000", "Abroadly", ">", "Search"]
     assert lines[3].strip() == "I built the search index."
+
+
+@pytest.mark.database
+def test_searches_by_keyword_with_the_lexical_strategy(search_database, tmp_path, capsys):
+    (tmp_path / "abroadly.md").write_text(DOCUMENT)
+    with psycopg.connect(search_database, row_factory=dict_row) as conn:
+        ingest(conn, tmp_path, FakeEmbedder(), chunk_size=1000, chunk_overlap=0)
+
+    assert search(get_settings(), ["Who built the index?", "--strategy", "lexical"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == 'lexical, k=5: "Who built the index?"'
+    assert lines[2].split()[0] == "1"
+    assert lines[2].split()[2:] == ["Abroadly", ">", "Search"]
+    assert lines[3].strip() == "I built the search index."

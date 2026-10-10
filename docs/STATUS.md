@@ -171,6 +171,18 @@ Phase 1 is complete.
   handler on a closed capture stream, which surfaced once a later test file logged.
 - 146 tests, 2 skipped (both `--run-model`, run by hand and passing). `make lint` clean.
 
+**Retrieval (3.3, lexical part of 3.5).**
+
+- `retrieval/lexical.py` has `LexicalRetriever(conn)`: Postgres full-text search over chunk
+  text, matching chunks that share any lexeme with the question, ranked by `ts_rank_cd`,
+  ties broken by chunk id. Needs no embedding, so it finds chunks dense cannot.
+- `retrieval/factory.py` has `build_strategy(name, conn, embedder, settings)` and
+  `STRATEGY_NAMES`, the one place a name maps to a class. `pb search --strategy` takes its
+  choices from there: `dense` or `lexical`.
+- A test EXPLAINs the exact query that runs and asserts it can use `chunks_text_fts`;
+  verified red by respelling the indexed expression.
+- 164 tests, 2 skipped (`--run-model`). `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -232,6 +244,9 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D41 | Dense search ranks only vectors from the running embedder's model and revision, and logs a warning naming any it skipped | Vectors from two models are not comparable; a missing chunk is visible and fixable, a chunk ranked on a meaningless score is neither |
 | D42 | The effective `hnsw.ef_search` is the larger of the setting and k, capped at pgvector's 1000, and local to the query's transaction | The index cannot return more rows than its shortlist, so a smaller value would cut results short without error; transaction-local keeps it off later queries on a pooled connection |
 | D43 | `ScoredChunk.provenance` is a tuple of `(strategy, rank)` | Fusion in 3.4 can record every strategy behind a result without changing the type |
+| D44 | Lexical search matches any of the question's lexemes, not all of them | Requiring all returned nothing for five of five realistic questions on the real corpus (see Findings) |
+| D45 | Strategies are built by name in one factory | `pb search`, 3.6, and the API choose strategies from strings; one mapping keeps them from drifting apart |
+| D46 | Dense and lexical each search the whole corpus independently; fusion merges their lists rather than one filtering for the other | A filter can only drop chunks. On the real corpus each arm misses chunks the other finds, so either must be able to rescue one |
 
 ## Open items
 
@@ -252,6 +267,7 @@ things noticed while doing something else that would otherwise be lost.
 | `transformers` prints a "Loading weights" progress bar on model load, which logging settings do not silence | Cosmetic; 8.x |
 | The pool's "opened" and "closed" INFO lines print around every `pb search` result | Cosmetic; 8.x |
 | The other-model check reads every row of `chunk_embeddings` on every search. Free at 76 rows, not at a much larger corpus | Move to once per process or into ingest if the corpus grows |
+| Two chunks are a heading and nothing else (`Revisiting the project for this review`, `What I built: an explainable traffic signal controller`), produced when a heading is followed directly by subheadings. They are noise in every search | 2.3, the chunker |
 | A question naming Tae is pulled toward `about.md`, whose title "About Tae Kim" is embedded with every chunk (see Findings) | 3.3 and 3.6 first; then D35 or the corpus titles, if the numbers say so |
 
 ## Findings
@@ -313,3 +329,24 @@ name in a question matches the title rather than the topic. Questions naming Tae
 common case for this bot. Not fixed here: the lexical arm (3.3) should find "Vanderbilt" and
 "degree" directly, and 3.6 is where the size of the effect gets measured. CI's first run
 with torch (PR 8) took 1m26s in total, closing the open item on install time.
+
+**2026-10-10, keyword matching needs any-word queries, and rewards common words.** Five
+realistic questions run as all-words queries (`plainto_tsquery`) returned nothing, every
+one: questions carry words like "go", "get", or "Tae" that rarely share a chunk ("tae"
+appears in 1 of 76). As any-word queries they all return results. "Did Tae go to
+Vanderbilt?" ranks `Education > Degrees and dates` 1st, and the Abroadly and chatbot
+questions land on the right documents. "Where did Tae go to school?" still misses
+Education, which never uses the word "school". `ts_rank_cd` counts matches without
+weighting rare words, so most scores are 0.1 to 0.4 in steps of 0.1 and ties are common: a
+match on "get" scores like a match on "vanderbilt". This is the gap BM25 (8.2) closes, and
+a number for 3.6 to measure, not something to tune here.
+
+**2026-10-10, fusion alone does not fix the name problem, and can undo a right answer.** A
+script merging dense and lexical top-20 lists by RRF (k=60), ahead of 3.4, on three
+questions about education. "Where did Tae go to school?": Education outside the fused top
+6 (dense 6th and 8th, lexical none). "Where did he go to school?": Education 4th, down from
+dense's 1st, because lexical matched "go" and "school" in unrelated chunks that then
+appeared in both lists. "What degree did Tae get?": Education 5th. Fusion rewards
+agreement, and here the two arms agreed on noise. Three questions are an anecdote, not a
+measurement; this is the case for writing the 3.6 question set, with questions naming Tae
+on purpose, before judging hybrid or any fix for the name.

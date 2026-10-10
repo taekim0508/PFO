@@ -21,11 +21,9 @@ from portfolio_bot.ingest.embedder import Embedder, SentenceTransformerEmbedder
 from portfolio_bot.ingest.pipeline import IngestReport, ingest
 from portfolio_bot.logging_config import configure_logging, get_logger
 from portfolio_bot.retrieval.base import RetrievalStrategy, ScoredChunk
-from portfolio_bot.retrieval.dense import DenseRetriever
+from portfolio_bot.retrieval.factory import STRATEGY_NAMES, build_strategy
 from portfolio_bot.settings import Settings, get_settings
 
-# Strategies `pb search --strategy` accepts. Lexical and hybrid join as they are built.
-SEARCH_STRATEGIES = ("dense",)
 # How much of a chunk's first line `pb search` shows, in characters.
 SNIPPET_WIDTH = 100
 
@@ -72,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", help="The question to search for")
     search_parser.add_argument(
         "--strategy",
-        choices=SEARCH_STRATEGIES,
+        choices=STRATEGY_NAMES,
         default="dense",
         help="How to rank chunks (default: dense)",
     )
@@ -212,9 +210,7 @@ def command_search(
 
     try:
         with connection() as conn:
-            strategy: RetrievalStrategy = DenseRetriever(
-                conn, embedder, ef_search=settings.hnsw_ef_search
-            )
+            strategy: RetrievalStrategy = build_strategy(args.strategy, conn, embedder, settings)
             results = strategy.retrieve(query, k)
     except psycopg.OperationalError as error:
         print("Cannot reach the database. Is it running? Try 'make db-up'.", file=sys.stderr)
