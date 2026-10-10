@@ -19,6 +19,7 @@ from typing import Any
 
 import psycopg
 
+from portfolio_bot.db.vector import vector_literal
 from portfolio_bot.ingest.chunker import Chunk, chunk_document
 from portfolio_bot.ingest.embedder import EMBEDDING_MAX_TOKENS, Embedder
 from portfolio_bot.ingest.loader import DocumentError, SourceDocument, discover, read_document
@@ -216,14 +217,9 @@ def _write_document(
                 """,
                 (
                     chunk_row["id"],
-                    _vector_literal(vector),
+                    vector_literal(vector),
                     embedder.model_name,
                     embedder.model_revision,
                 ),
             )
     return len(chunks)
-
-
-def _vector_literal(vector: Sequence[float]) -> str:
-    """pgvector's text form, '[0.1,0.2,...]'. Saves a dependency on pgvector's adapter."""
-    return "[" + ",".join(repr(float(value)) for value in vector) + "]"

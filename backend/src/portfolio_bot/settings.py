@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # How many texts go through the model at once. Larger batches are faster up to the
     # point where they stop fitting in memory; 32 is comfortable on a laptop CPU.
     embedding_batch_size: int = 32
+    # Put in front of a question, never a chunk, before embedding it. bge was trained with
+    # this exact sentence on its questions, which is what teaches it to place a short
+    # question near the longer passage that answers it. Empty turns it off.
+    embedding_query_instruction: str = "Represent this sentence for searching relevant passages: "
 
     # Corpus. The directory `pb ingest` mirrors into the database. Resolved from this file
     # for the same reason as ENV_FILE, so it does not depend on the working directory.
@@ -64,6 +68,11 @@ class Settings(BaseSettings):
 
     # Retrieval.
     top_k: int = 5
+    # How many candidates an HNSW search keeps on its shortlist as it walks the graph.
+    # Wider finds the true nearest chunks more often and costs more distance computations.
+    # It also caps how many rows the index can return, so the dense retriever raises it to
+    # k when k is larger. 40 is pgvector's own default, written out so it is visible.
+    hnsw_ef_search: int = 40
     rrf_k: int = 60
 
     # Generation. These three are what make the model layer provider-agnostic: Ollama,
