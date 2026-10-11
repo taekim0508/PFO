@@ -161,6 +161,7 @@ on retrieval or generation, use `pb` directly rather than through `make`.
 |- docker-compose.yml
 |- .env.example
 |- content/                 corpus source, markdown, hand-written by Tae
+|- eval/                    retrieval evaluation set, hand-written by Tae
 |- docs/
 |  |- ROADMAP.md            inventory of the work, grouped by area
 |  |- STATUS.md             what exists, decisions, open items, findings
