@@ -282,6 +282,7 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D48 | Equal fused scores are broken by chunk id | Symmetric ranks (1st and 2nd against 2nd and 1st) tie exactly; any fixed rule beats an order that varies by run. Note it is arbitrary, not a judgment of which chunk is better |
 | D49 | Eval answers are sections, not chunks, and a section covers everything beneath it | Chunk ids change on every ingest, and chunk size is one of the things 3.6 exists to compare; a section survives both |
 | D50 | precision@k divides by k, not by how many results came back | A strategy returning two chunks for k=5 should not get perfect precision for getting both right |
+| D51 | The bot speaks as a close friend answering on Tae's behalf, in the third person, not as Tae | Tae's call. Eval questions are mostly third person ("Tae", "he"), with a few "you" twins for visitors who address the bot as Tae anyway |
 
 ## Open items
 
@@ -304,6 +305,7 @@ things noticed while doing something else that would otherwise be lost.
 | The other-model check reads every row of `chunk_embeddings` on every search. Free at 76 rows, not at a much larger corpus | Move to once per process or into ingest if the corpus grows |
 | Two chunks are a heading and nothing else (`Revisiting the project for this review`, `What I built: an explainable traffic signal controller`), produced when a heading is followed directly by subheadings. They are noise in every search | 2.3, the chunker |
 | A question naming Tae is pulled toward `about.md`, whose title "About Tae Kim" is embedded with every chunk (see Findings) | 3.3 and 3.6 first; then D35 or the corpus titles, if the numbers say so |
+| The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
 
 ## Findings
 

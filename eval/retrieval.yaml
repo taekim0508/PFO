@@ -16,7 +16,464 @@
 # so `education.md` alone means any chunk of that file.
 #
 # Write questions the way a visitor would ask them, including ones that use Tae's name.
+# A question that names Tae is followed by its pronoun twin, identical except for "Tae"
+# becoming "he", "his", or "him", with the same expected sections. Reading each pair's
+# ranks side by side isolates what the name alone does to retrieval. A few pairs also have
+# a "you" twin. The bot speaks as a friend answering on Tae's behalf, so "you" there is a
+# visitor addressing the bot as if it were Tae, which visitors will still do.
 # A question no section answers cannot be scored here; leave those for the generation
 # evaluation.
 
-questions: []
+questions:
+  # about.md
+  - question: How did Tae get into programming?
+    expected:
+      - about.md > How I got into software engineering, and the throughline from internship to research
+    note: names Tae
+  - question: How did he get into programming?
+    expected:
+      - about.md > How I got into software engineering, and the throughline from internship to research
+    note: pronoun twin of the question above
+  - question: Why did he switch from medicine to computer science?
+    expected:
+      - about.md > How I got into software engineering, and the throughline from internship to research
+    note: paraphrase, the text never says "switch"
+  - question: Is Tae more of a frontend or a backend engineer?
+    expected:
+      - about.md > The kind of engineering problems I gravitate toward
+    note: names Tae
+  - question: Is he more of a frontend or a backend engineer?
+    expected:
+      - about.md > The kind of engineering problems I gravitate toward
+    note: pronoun twin of the question above
+  - question: What are his weaknesses as an engineer?
+    expected:
+      - "about.md > Where my experience is still limited: engineering at scale"
+    note: paraphrase, the text says "gap" and "limited", never "weakness"
+  - question: Has Tae worked on large-scale systems?
+    expected:
+      - "about.md > Where my experience is still limited: engineering at scale"
+    note: names Tae
+  - question: Has he worked on large-scale systems?
+    expected:
+      - "about.md > Where my experience is still limited: engineering at scale"
+    note: pronoun twin of the question above
+
+  # education.md
+  - question: Where did Tae go to school?
+    expected:
+      - education.md > Degrees and dates
+    note: names Tae; the text never says "school" (see Findings)
+  - question: Where did he go to school?
+    expected:
+      - education.md > Degrees and dates
+    note: pronoun twin of the question above
+  - question: Where did you go to school?
+    expected:
+      - education.md > Degrees and dates
+    note: you twin; a visitor addressing the bot as if it were Tae
+  - question: When did he graduate?
+    expected:
+      - education.md > Degrees and dates
+  - question: What was Tae's GPA?
+    expected:
+      - education.md > Degrees and dates
+    note: names Tae
+  - question: What was his GPA?
+    expected:
+      - education.md > Degrees and dates
+    note: pronoun twin of the question above
+  - question: What classes did he take in college?
+    expected:
+      - education.md > Relevant coursework
+    note: paraphrase, the text says "courses" and "coursework"
+
+  # skills.md
+  - question: What programming languages does Tae know?
+    expected:
+      - skills.md > Languages
+    note: names Tae
+  - question: What programming languages does he know?
+    expected:
+      - skills.md > Languages
+    note: pronoun twin of the question above
+  - question: Has he used AWS?
+    expected:
+      - skills.md > Cloud, CI/CD, and operations
+    note: other files mention AWS in passing; this section is the full list
+  - question: How can I contact Tae?
+    expected:
+      - skills.md > How to reach me
+    note: names Tae; paraphrase, the text says "reach"
+  - question: How can I contact him?
+    expected:
+      - skills.md > How to reach me
+    note: pronoun twin of the question above
+  - question: Where can I see his code?
+    expected:
+      - skills.md > How to reach me
+    note: paraphrase, the answer is a GitHub link
+  - question: Which LLM APIs has Tae worked with?
+    expected:
+      - skills.md > AI and LLM work
+    note: names Tae
+  - question: Which LLM APIs has he worked with?
+    expected:
+      - skills.md > AI and LLM work
+    note: pronoun twin of the question above
+
+  # abroadly.md
+  - question: What is Abroadly?
+    expected:
+      - abroadly.md > The problem Abroadly solves
+  - question: What did Tae personally build on the study abroad project?
+    expected:
+      - abroadly.md > What I built and owned
+    note: names Tae; refers to Abroadly without naming it
+  - question: What did he personally build on the study abroad project?
+    expected:
+      - abroadly.md > What I built and owned
+    note: pronoun twin of the question above
+  - question: How did he make a slow database query faster?
+    expected:
+      - abroadly.md > Fixing a slow filtered-search query
+    note: about.md repeats the numbers in one sentence; this section is the full account
+  - question: How did Tae handle a disagreement with a teammate?
+    expected:
+      - abroadly.md > A sprint scope disagreement with a teammate
+    note: names Tae
+  - question: How did he handle a disagreement with a teammate?
+    expected:
+      - abroadly.md > A sprint scope disagreement with a teammate
+    note: pronoun twin of the question above
+  - question: Tell me about a time you had a conflict with a coworker.
+    expected:
+      - abroadly.md > A sprint scope disagreement with a teammate
+    note: interview phrasing in the second person; the text never says "conflict"
+  - question: Why didn't Abroadly use passwords?
+    expected:
+      - abroadly.md > Why magic links instead of passwords
+  - question: How did they prevent race conditions when saving items?
+    expected:
+      - abroadly.md > Preventing duplicate bookmarks under concurrent requests
+    note: paraphrase, the text never says "race condition"
+  - question: What flaws has Tae found in Abroadly's code since it shipped?
+    expected:
+      - abroadly.md > Revisiting the project for this review
+    note: names Tae
+  - question: What flaws has he found in Abroadly's code since it shipped?
+    expected:
+      - abroadly.md > Revisiting the project for this review
+    note: pronoun twin of the question above
+  - question: How was the Abroadly database schema designed?
+    expected:
+      - abroadly.md > Why programs, places, and trips are separate data models
+      - abroadly.md > Separating program housing from independent housing
+    note: a full answer needs both modeling decisions
+
+  # ai-producer-ambassador-matching-pipeline.md
+  - question: What did Tae do at his internship?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md
+    note: names Tae; broad, any part of the file answers it
+  - question: What did he do at his internship?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md
+    note: pronoun twin of the question above
+  - question: What did you do at your internship?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md
+    note: you twin; a visitor addressing the bot as if it were Tae
+  - question: Where did he intern, and when?
+    expected:
+      - "ai-producer-ambassador-matching-pipeline.md > The problem: matching Gen Z students with AI ambassadors"
+  - question: How did the ambassador matching system work?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > The six-stage pipeline
+      - ai-producer-ambassador-matching-pipeline.md > How retrieval narrows the candidate pool before any model call
+    note: a full answer needs the stages and the retrieval that feeds them
+  - question: Why didn't the students just pick their own mentor?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > Why the system decides matches instead of just recommending options
+    note: paraphrase, the text says "ambassador", not "mentor"
+  - question: Tell me about a hard bug you debugged.
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > Debugging retrieval that looked plausible but wasn't right
+    note: interview phrasing; the text says "hardest problem", not "bug"
+  - question: How did Tae keep bias out of the matching?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > What I decided was allowed to influence a match
+    note: names Tae; the text never says "bias"
+  - question: How did he keep bias out of the matching?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > What I decided was allowed to influence a match
+    note: pronoun twin of the question above
+  - question: How did he stop the model from making up reasons for a match?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > Making the matches explainable, not just plausible
+    note: paraphrase, the text says "fabrication"
+  - question: Did the matching system ever go to production?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > What I validated, and what I'd have done next
+  - question: Who was Tae's manager at AI Producer?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > Details about the internship I don't have on record
+    note: names Tae; the honest answer is that it is not on record
+  - question: Who was his manager at AI Producer?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > Details about the internship I don't have on record
+    note: pronoun twin of the question above
+  - question: How did he deal with not having clear direction at a startup?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md > Handling the ambiguity of a startup internship with no clearly defined path
+
+  # followthru.md
+  - question: What is FollowThru?
+    expected:
+      - followthru.md > The problem FollowThru solves
+  - question: How does the habit app keep the chatbot from forgetting what the user said earlier?
+    expected:
+      - followthru.md > Keeping context across stateless model calls
+    note: refers to FollowThru without naming it
+  - question: How did Tae handle unsafe or off-topic requests in his AI chat app?
+    expected:
+      - followthru.md > Making a multi-turn LLM conversation reliable
+    note: names Tae; the text says "sensitive", not "unsafe"
+  - question: How did he handle unsafe or off-topic requests in his AI chat app?
+    expected:
+      - followthru.md > Making a multi-turn LLM conversation reliable
+    note: pronoun twin of the question above
+  - question: What happens when the model returns invalid JSON?
+    expected:
+      - followthru.md > Separating extraction from generation with prompt chaining
+    note: the answer (validation errors sent back, two retries) sits under a heading about prompt chaining
+  - question: Where is the FollowThru backend hosted?
+    expected:
+      - followthru.md > How I deployed the backend
+  - question: Has Tae ever fine-tuned a model?
+    expected:
+      - followthru.md > A fine-tuning experiment I'd want to run next
+    note: names Tae; the answer is that it is planned, not done
+  - question: Has he ever fine-tuned a model?
+    expected:
+      - followthru.md > A fine-tuning experiment I'd want to run next
+    note: pronoun twin of the question above
+  - question: What would he change first about FollowThru?
+    expected:
+      - "followthru.md > What I'd improve first: persistent memory across conversations"
+
+  # xcps-lab-research.md
+  - question: What research did Tae do in college?
+    expected:
+      - xcps-lab-research.md
+    note: names Tae; broad, any part of the file answers it
+  - question: What research did he do in college?
+    expected:
+      - xcps-lab-research.md
+    note: pronoun twin of the question above
+  - question: What research did you do in college?
+    expected:
+      - xcps-lab-research.md
+    note: you twin; a visitor addressing the bot as if it were Tae
+  - question: Who ran the lab Tae worked in?
+    expected:
+      - xcps-lab-research.md > My role in the lab
+    note: names Tae
+  - question: Who ran the lab he worked in?
+    expected:
+      - xcps-lab-research.md > My role in the lab
+    note: pronoun twin of the question above
+  - question: Which traffic controller performed best?
+    expected:
+      - xcps-lab-research.md > Results
+  - question: How does the reinforcement learning controller work?
+    expected:
+      - xcps-lab-research.md > Three controllers under the same rules
+    note: paraphrase, the text says "Q-learning", never "reinforcement learning"
+  - question: How does he know the explanations are accurate?
+    expected:
+      - xcps-lab-research.md > Making the explanations faithful, not just plausible
+    note: paraphrase, the text says "faithful" and "fidelity"
+  - question: Could the traffic controller be used on a real road?
+    expected:
+      - xcps-lab-research.md > Limitations
+
+  # personal-portfolio-chatbot.md
+  - question: How does this chatbot work?
+    expected:
+      - personal-portfolio-chatbot.md > What I'm building, and what's actually running today
+  - question: Why does this bot use Llama instead of GPT or Claude?
+    expected:
+      - personal-portfolio-chatbot.md > Why I chose open-weight models and hybrid retrieval
+    note: the text says "open-weight", "Anthropic", and "OpenAI"
+  - question: What was different about the first version of this chatbot?
+    expected:
+      - personal-portfolio-chatbot.md > The first version, and how it differs from this one
+  - question: Is this chatbot finished?
+    expected:
+      - personal-portfolio-chatbot.md > What I'm building, and what's actually running today
+      - personal-portfolio-chatbot.md > Open engineering decisions I'm still working through
+    note: a full answer needs what is running and what is still open
+
+  # General recruiter questions, each asked with the name and then with a pronoun.
+  - question: What projects has Tae done?
+    expected:
+      - abroadly.md
+      - followthru.md
+      - personal-portfolio-chatbot.md
+      - xcps-lab-research.md
+      - ai-producer-ambassador-matching-pipeline.md
+    note: names Tae; breadth, recall@5 is 1.0 only if all five projects reach the top 5
+  - question: What projects has he done?
+    expected:
+      - abroadly.md
+      - followthru.md
+      - personal-portfolio-chatbot.md
+      - xcps-lab-research.md
+      - ai-producer-ambassador-matching-pipeline.md
+    note: pronoun twin of the question above
+  - question: What projects have you done?
+    expected:
+      - abroadly.md
+      - followthru.md
+      - personal-portfolio-chatbot.md
+      - xcps-lab-research.md
+      - ai-producer-ambassador-matching-pipeline.md
+    note: you twin; a visitor addressing the bot as if it were Tae
+  - question: What experience does Tae have?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md
+      - xcps-lab-research.md
+    note: names Tae; read as resume experience, the internship and the research position
+  - question: What experience does he have?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md
+      - xcps-lab-research.md
+    note: pronoun twin of the question above
+  - question: What experience do you have?
+    expected:
+      - ai-producer-ambassador-matching-pipeline.md
+      - xcps-lab-research.md
+    note: you twin; a visitor addressing the bot as if it were Tae
+  - question: Tell me about Tae.
+    expected:
+      - about.md
+    note: names Tae; the one question where the name should pull toward about.md
+  - question: Tell me about him.
+    expected:
+      - about.md
+    note: pronoun twin of the question above
+  - question: What degree does Tae have?
+    expected:
+      - education.md > Degrees and dates
+    note: names Tae
+  - question: What degree does he have?
+    expected:
+      - education.md > Degrees and dates
+    note: pronoun twin of the question above
+  - question: Has Tae done an internship?
+    expected:
+      - "ai-producer-ambassador-matching-pipeline.md > The problem: matching Gen Z students with AI ambassadors"
+    note: names Tae; the section with the company, role, and dates
+  - question: Has he done an internship?
+    expected:
+      - "ai-producer-ambassador-matching-pipeline.md > The problem: matching Gen Z students with AI ambassadors"
+    note: pronoun twin of the question above
+  - question: What is Tae's tech stack?
+    expected:
+      - skills.md
+    note: names Tae; any skills section answers it
+  - question: What is his tech stack?
+    expected:
+      - skills.md
+    note: pronoun twin of the question above
+  - question: What is your tech stack?
+    expected:
+      - skills.md
+    note: you twin; a visitor addressing the bot as if it were Tae
+  - question: Does Tae have leadership experience?
+    expected:
+      - abroadly.md > What I built and owned
+      - followthru.md > The problem FollowThru solves
+    note: names Tae; he led both teams, and the text says "led", never "leadership"
+  - question: Does he have leadership experience?
+    expected:
+      - abroadly.md > What I built and owned
+      - followthru.md > The problem FollowThru solves
+    note: pronoun twin of the question above
+  - question: Does Tae have AI or machine learning experience?
+    expected:
+      - skills.md > AI and LLM work
+      - ai-producer-ambassador-matching-pipeline.md
+    note: names Tae; a full answer needs the list and the main example
+  - question: Does he have AI or machine learning experience?
+    expected:
+      - skills.md > AI and LLM work
+      - ai-producer-ambassador-matching-pipeline.md
+    note: pronoun twin of the question above
+  - question: What databases has Tae worked with?
+    expected:
+      - skills.md > Backend and data
+    note: names Tae
+  - question: What databases has he worked with?
+    expected:
+      - skills.md > Backend and data
+    note: pronoun twin of the question above
+  - question: Has Tae shipped anything to real users?
+    expected:
+      - "about.md > Where my experience is still limited: engineering at scale"
+    note: names Tae; the section that lists every deployment, so about.md is right here
+  - question: Has he shipped anything to real users?
+    expected:
+      - "about.md > Where my experience is still limited: engineering at scale"
+    note: pronoun twin of the question above
+
+  # Job search logistics, each asked with the name and then with a pronoun.
+  - question: Where is Tae located?
+    expected:
+      - "job-search.md > Where I'm located, and whether I'll relocate"
+    note: names Tae
+  - question: Where is he located?
+    expected:
+      - "job-search.md > Where I'm located, and whether I'll relocate"
+    note: pronoun twin of the question above
+  - question: Is Tae willing to relocate?
+    expected:
+      - "job-search.md > Where I'm located, and whether I'll relocate"
+    note: names Tae; the text says "open to relocating"
+  - question: Is he willing to relocate?
+    expected:
+      - "job-search.md > Where I'm located, and whether I'll relocate"
+    note: pronoun twin of the question above
+  - question: What kind of role is Tae looking for?
+    expected:
+      - "job-search.md > The roles I'm looking for"
+    note: names Tae
+  - question: What kind of role is he looking for?
+    expected:
+      - "job-search.md > The roles I'm looking for"
+    note: pronoun twin of the question above
+  - question: When can Tae start?
+    expected:
+      - "job-search.md > When I can start, and work authorization"
+    note: names Tae
+  - question: When can he start?
+    expected:
+      - "job-search.md > When I can start, and work authorization"
+    note: pronoun twin of the question above
+  - question: Does Tae need visa sponsorship?
+    expected:
+      - "job-search.md > When I can start, and work authorization"
+    note: names Tae
+  - question: Does he need visa sponsorship?
+    expected:
+      - "job-search.md > When I can start, and work authorization"
+    note: pronoun twin of the question above
+  - question: Is Tae authorized to work in the US?
+    expected:
+      - "job-search.md > When I can start, and work authorization"
+    note: names Tae; the text says "US citizen" and "United States", never "authorized"
+  - question: Is he authorized to work in the US?
+    expected:
+      - "job-search.md > When I can start, and work authorization"
+    note: pronoun twin of the question above
