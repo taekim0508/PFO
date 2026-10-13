@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for "Index". Every color in the UI comes from these variables, so light
+ * and dark mode are one switch: the data-theme attribute on <html>, set before first paint
+ * by the script in layout.tsx.
+ *
+ * Contrast (WCAG AA wants 4.5:1 for body text, 3:1 for large text and focus outlines),
+ * measured against the cream and the blush edge:
+ *   ink #1A1A1A          17.1 / 15.4
+ *   muted #6E6B78         5.1 / 4.6   all secondary text
+ *   faint #9896A3         2.9 / 2.6   hairlines and decoration only, never text
+ *   accent #FF5F33        3.0 / 2.7   fills, highlights, the submit button (ink on it: 5.8)
+ *   accent-strong #C2410C 5.1 / 4.6   links, focus outlines, any orange text
+ * Dark mode: text #F3EEE8 15.0, muted #A39DA8 6.5, faint #8A8490 4.8, accent #FF5F33 5.7
+ * against the charcoal centre #1E1A17.
+ */
+
+:root {
+  --bg-center: #fffdf1;
+  --bg-mid: #fff4e8;
+  --bg-edge: #fceeec;
+  --ink: #1a1a1a;
+  --muted: #6e6b78;
+  --faint: #9896a3;
+  --accent: #ff5f33;
+  --accent-strong: #c2410c;
+  --peach: #ffbb91;
+  --surface: rgba(255, 255, 255, 0.55);
+  --surface-strong: rgba(255, 255, 255, 0.82);
+  --hairline: rgba(0, 0, 0, 0.06);
+  --hairline-strong: rgba(0, 0, 0, 0.12);
+  --peach-tint: rgba(255, 187, 145, 0.18);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg-center: #1e1a17;
+  --bg-mid: #191614;
+  --bg-edge: #141110;
+  --ink: #f3eee8;
+  --muted: #a39da8;
+  --faint: #8a8490;
+  --accent: #ff5f33;
+  --accent-strong: #ff7a55;
+  --peach: #ffbb91;
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-strong: rgba(30, 26, 23, 0.88);
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --peach-tint: rgba(255, 187, 145, 0.1);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-peach: var(--peach);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-peach-tint: var(--peach-tint);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+}
+
+html {
+  background: var(--bg-edge);
+}
+
+/* Warm light, not a visible gradient. Fixed, so it stays put while content scrolls. */
+body {
+  min-height: 100dvh;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  background: radial-gradient(
+      120% 90% at 50% 35%,
+      var(--bg-center) 0%,
+      var(--bg-mid) 55%,
+      var(--bg-edge) 100%
+    )
+    fixed;
+}
+
+::selection {
+  background: var(--peach);
+  color: #1a1a1a;
+}
+
+/* One focus style everywhere: a visible orange outline that clears AA as a non-text cue. */
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* Small uppercase tracked labels for metadata, e.g. "BACKEND · AI". */
+@utility label {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Translucent card surface with a hairline and light blur. */
+@utility glass {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 220ms ease-out both;
+}

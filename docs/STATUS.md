@@ -384,6 +384,47 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - FastAPI, uvicorn added as runtime dependencies; httpx as a dev one (the API tests).
 - 352 tests, 4 skipped. `make lint` clean.
 
+**Frontend foundation (6.1, 6.2, start of 6.5).**
+
+- `frontend/` is Next.js 16.4 (App Router, TypeScript, Tailwind v4, Cache Components on)
+  from `create-next-app`, boilerplate deleted. Vitest with Testing Library and jsdom,
+  Prettier with `eslint-config-prettier`. `npm run lint` is eslint, `prettier --check`,
+  and `tsc --noEmit`.
+- Design tokens for the "Index" brief in `src/app/globals.css`:
+  - Warm cream, peach, and blush radial background, fixed.
+  - Ink, muted, faint, accent, accent-strong, peach, surface, and hairline as CSS
+    variables, redefined under `[data-theme="dark"]` for a warm charcoal.
+  - Utilities: `label` (small tracked caps) and `glass` (translucent card with hairline
+    and blur).
+  - One orange focus outline everywhere.
+  - Reduced motion respected.
+
+  Tailwind v4 keeps tokens in CSS (`@theme`), not the `tailwind.config.ts` 6.2 names.
+- Two brief colors fail WCAG AA as text on the cream: gray #9896A3 (2.85:1) and orange
+  #FF5F33 (2.97:1). Text uses #6E6B78 (5.1:1) and links and focus use #C2410C (5.1:1);
+  the brief's values stay for hairlines, fills, and highlights (D63).
+- Fonts: Instrument Serif for headings, Inter for text, through `next/font`.
+- Light or dark is set by an inline script before first paint from a saved choice or the
+  system setting, so the page never flashes the wrong theme.
+- The floating navbar:
+  - The "TAE KIM" wordmark.
+  - Work, Résumé, and GitHub links. The résumé is a marked "soon" placeholder until
+    `frontend/public/resume.pdf` exists, checked once at build.
+  - Copy Email, which shows "Copied!" for 1.5s.
+  - The theme toggle.
+  - A Seattle clock, rendered client-side.
+  - On phones, collapses to wordmark, Copy Email, and a menu sheet that Escape closes.
+- The opening screen is the brief's headline, intro, three chips, and the pill question
+  box, plus one line under it saying answers come from a friend, drawn only from Tae's
+  writing. Not yet wired to the API; that is the chat unit.
+- `make setup` runs `npm ci`. `make dev` runs the API and the site together
+  (`dev-api`, `dev-web`). `make test` and `make lint` are `-backend` plus `-frontend`
+  halves. CI's backend job runs `make lint-backend`; a new frontend job runs lint,
+  tests, and `next build` on Node 22.
+- `@types/node` is ^22 rather than the scaffold's ^20, which vitest 5 refuses.
+- 352 backend tests, 4 skipped; 7 frontend tests. `make lint` clean on both halves.
+  `next build` succeeds with `/` prerendered static.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -463,6 +504,8 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D59 | The API is an app factory run by uvicorn with `--factory` | Importing the module then reads no settings and opens no connections, so tests build their own app with fakes and nothing global leaks between them |
 | D60 | After a chat stream opens, every failure is an `error` event with a fixed visitor-safe message | The HTTP status is already 200 once the first byte is sent; the browser needs a structured ending either way, and internals (hosts, URLs, traces) stay in the log |
 | D61 | Rate limiting is in process memory, by client IP, checked before streaming | One machine, one worker is the whole site (7.3). A second instance needs a shared store, and behind a proxy the IP must come from the proxy's header (see Open items) |
+| D62 | The chat speaks as the friend (D51); the site's own copy (headline, intro, chips, placeholder) speaks as Tae, as the design brief wrote it, with one line under the input saying who answers | Tae's call, keeping the brief's voice while making the switch of speaker explicit to a visitor |
+| D63 | Secondary text is #6E6B78 and orange text and focus outlines are #C2410C (dark: #A39DA8, #FF5F33), instead of the brief's #9896A3 and #FF5F33 | The brief asks for WCAG AA and its two values measure 2.85:1 and 2.97:1 on the cream; same hues, darker shades, brief values kept for decoration and fills |
 
 ## Open items
 
@@ -685,4 +728,24 @@ median 0.501, maximum 0.615 ("Explain quantum entanglement" 0.615, "How do I rev
 linked list in Python?" 0.609, "hi" 0.589, "What's the weather in Seattle today?" 0.569).
 Technical off-topic questions resemble a technical corpus. The floor was set at 0.52,
 under every real question, which stops about half the off-topic set before the model.
+
+**2026-10-13, the whole evaluation set through `pb ask`: no slipped "I", no invented
+citations.** All 106 evaluation questions and 15 off-topic ones, dense, `qwen3.5:9b`,
+reasoning off, prompt 2026-10-13.1. Run unattended while other work used Ollama, so
+timings are pessimistic.
+
+- First person: 0 of 106 answers used "I", "my", or "me" for Tae (a regex flag, with the
+  friend's own "I'd rather not guess" and "I am only here" excluded).
+- Citations: 0 citations of passages that were not given. 103 of 106 cited at least one
+  passage. The 3 that did not are 2 correct "not on record" refusals (the AI Producer
+  manager pair) and 1 cut-off answer (below).
+- Off topic: 15 of 15 declined. 8 by the relevance floor before the model, 7 by the
+  prompt's rule. "hi" got a greeting that cited the job-search passages, which is fine.
+- No answer hit the token ceiling; no request failed.
+- Latency on the laptop: first words median 4.6s, 90th percentile 6.5s; full answer
+  median 7.2s, 90th percentile 10.2s.
+- One answer stopped mid-sentence: "Where did he intern, and when?" returned "Tae
+  interned as a software" with `finish_reason` None and no error. Asked three times
+  afterwards it answered fully each time. A stream that ends without a finish reason
+  was being reported as a finished answer; the next commit turns it into an error.
 

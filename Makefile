@@ -4,10 +4,13 @@
 # Kept compatible with GNU Make 3.81, the version macOS ships.
 
 BACKEND := backend
+FRONTEND := frontend
 UV := uv
+NPM := npm
 
 .DEFAULT_GOAL := help
-.PHONY: help setup db-up db-down model-up migrate ingest dev test lint
+.PHONY: help setup db-up db-down model-up migrate ingest dev dev-api dev-web \
+	test test-backend test-frontend lint lint-backend lint-frontend
 
 help:
 	@echo "Targets:"
@@ -24,7 +27,8 @@ help:
 setup:
 	@echo "==> Python dependencies"
 	cd $(BACKEND) && $(UV) sync
-	@echo "==> Node dependencies skipped: frontend/ does not exist yet (roadmap 6.1)"
+	@echo "==> Node dependencies"
+	cd $(FRONTEND) && $(NPM) ci
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "==> Created .env from .env.example."; \
@@ -34,7 +38,9 @@ setup:
 		echo "==> .env already exists, left alone"; \
 	fi
 
-test:
+test: test-backend test-frontend
+
+test-backend:
 	@# Tests marked `database` skip themselves when Postgres is unreachable, which would
 	@# otherwise let a suite that ran half of itself look like a clean pass. Say so first.
 	@if ! docker compose ps --status running --services 2>/dev/null | grep -q '^db$$'; then \
@@ -43,16 +49,24 @@ test:
 	fi
 	@echo "==> Backend tests"
 	cd $(BACKEND) && $(UV) run pytest
-	@echo "==> Frontend tests skipped: frontend/ does not exist yet (roadmap 6.1)"
 
-lint:
+test-frontend:
+	@echo "==> Frontend tests"
+	cd $(FRONTEND) && $(NPM) test
+
+lint: lint-backend lint-frontend
+
+lint-backend:
 	@echo "==> ruff check"
 	cd $(BACKEND) && $(UV) run ruff check .
 	@echo "==> ruff format --check"
 	cd $(BACKEND) && $(UV) run ruff format --check .
 	@echo "==> mypy"
 	cd $(BACKEND) && $(UV) run mypy
-	@echo "==> eslint and prettier skipped: frontend/ does not exist yet (roadmap 6.1)"
+
+lint-frontend:
+	@echo "==> eslint, prettier --check, tsc"
+	cd $(FRONTEND) && $(NPM) run lint
 
 db-up:
 	@if [ ! -f .env ]; then \
@@ -94,7 +108,13 @@ migrate:
 ingest:
 	cd $(BACKEND) && $(UV) run pb ingest
 
-# The API on :8000, reloading on source changes. create_app is a factory, so importing
-# the module reads no settings. The frontend joins this target in 6.1.
+# The API on :8000 and the site on :3000, together; Ctrl-C stops both. create_app is a
+# factory, so importing the module reads no settings.
 dev:
+	@$(MAKE) -j2 dev-api dev-web
+
+dev-api:
 	cd $(BACKEND) && $(UV) run uvicorn portfolio_bot.api.app:create_app --factory --reload --port 8000
+
+dev-web:
+	cd $(FRONTEND) && $(NPM) run dev

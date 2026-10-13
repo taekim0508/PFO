@@ -64,7 +64,7 @@ jobs:
       # Before the tests: a formatting failure is a five second fix and there is no reason
       # to wait on the database tests to hear about it.
       - name: Lint
-        run: make lint
+        run: make lint-backend
 
       # pytest directly rather than `make test`, whose Docker preflight check has nothing
       # to look at here: Postgres is a service container, not a compose project. -rs names
@@ -73,3 +73,32 @@ jobs:
       - name: Test
         run: uv run pytest -rs
         working-directory: backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # ci rather than install: fails if package-lock.json and package.json disagree.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # The build is the check that server and client components fit together.
+      - name: Build
+        run: npm run build
+
