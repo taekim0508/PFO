@@ -420,8 +420,7 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - `make setup` runs `npm ci`. `make dev` runs the API and the site together
   (`dev-api`, `dev-web`). `make test` and `make lint` are `-backend` plus `-frontend`
   halves. CI's backend job runs `make lint-backend`; a new frontend job runs lint,
-  tests, and `next build` on Node 22, with npm upgraded to 11 first (see Findings
-  2026-10-13, the lock file).
+  tests, and `next build` on Node 22.
 - `@types/node` is ^22 rather than the scaffold's ^20, which vitest 5 refuses.
 - 352 backend tests, 4 skipped; 7 frontend tests. `make lint` clean on both halves.
   `next build` succeeds with `/` prerendered static.
@@ -749,14 +748,4 @@ timings are pessimistic.
   interned as a software" with `finish_reason` None and no error. Asked three times
   afterwards it answered fully each time. A stream that ends without a finish reason
   was being reported as a finished answer; the next commit turns it into an error.
-
-**2026-10-13, the frontend CI job failed on `npm ci`, from an npm version mismatch.** The
-first frontend run, on `main` after `frontend-foundation` merged, stopped at install:
-`Missing: @emnapi/runtime@1.11.3 from lock file`, and the same for `@emnapi/core`. The
-lock file was written by npm 11.6 on the Mac; Node 22 on the runner ships npm 10.9.9,
-which expects entries for those two optional, wasm-only packages that npm 11 leaves out.
-Reproduced off the runner: on the same `package.json` and lock, `npm@10.9.9 ci` fails with
-the same message and npm 11 passes. Local checks never caught it because they ran npm 11.
-CI now installs npm 11 before `npm ci`; on a clean copy of `frontend/` with npm 11.21,
-install, lint, 7 tests, and `next build` all pass. The lock file is unchanged.
 
