@@ -18,6 +18,8 @@ from portfolio_bot.generation.client import (
     ModelRequestError,
     ModelUnavailableError,
     OpenAICompatibleClient,
+    StreamDone,
+    TextDelta,
     build_model_client,
 )
 from portfolio_bot.settings import get_settings
@@ -67,7 +69,7 @@ class Server:
         return json.loads(self.requests[index].content)
 
 
-def client_for(server, *, base_url=BASE_URL, max_retries=3):
+def client_for(server, *, base_url=BASE_URL, max_retries=3, reasoning_effort=None):
     http = httpx2.AsyncClient(transport=httpx2.MockTransport(server))
     return OpenAICompatibleClient(
         base_url=base_url,
@@ -75,6 +77,7 @@ def client_for(server, *, base_url=BASE_URL, max_retries=3):
         model="test-model",
         timeout=5.0,
         max_retries=max_retries,
+        reasoning_effort=reasoning_effort,
         http_client=http,
     )
 
@@ -283,6 +286,146 @@ async def test_a_long_error_body_is_cut_short_in_the_message(waits):
     assert len(str(caught.value)) < 400
 
 
+# Reasoning
+
+
+async def test_reasoning_effort_is_sent_only_when_configured():
+    server = Server(chat_response())
+
+    await client_for(server).complete(HELLO)
+    await client_for(server, reasoning_effort="none").complete(HELLO)
+
+    assert "reasoning_effort" not in server.body(0)
+    assert server.body(1)["reasoning_effort"] == "none"
+
+
+# Streaming
+
+
+def chunk(content=None, *, finish_reason=None, reasoning=None, usage=None, choices=True):
+    delta = {}
+    if content is not None:
+        delta["content"] = content
+    if reasoning is not None:
+        delta["reasoning"] = reasoning
+    body = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "served-model",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]
+        if choices
+        else [],
+    }
+    if usage is not None:
+        body["usage"] = usage
+    return body
+
+
+def sse(*chunks):
+    """A server-sent event stream: one `data:` line per chunk, then the [DONE] marker."""
+    body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+    return httpx2.Response(
+        200, headers={"content-type": "text/event-stream"}, content=body.encode()
+    )
+
+
+async def collect(client, **options):
+    return [event async for event in client.stream(HELLO, **options)]
+
+
+async def test_streams_text_in_order_then_one_done_event():
+    server = Server(
+        sse(
+            chunk("Tae "),
+            chunk("studied "),
+            chunk("at Vanderbilt.", finish_reason="stop"),
+            chunk(choices=False, usage={"prompt_tokens": 40, "completion_tokens": 5}),
+        )
+    )
+
+    events = await collect(client_for(server))
+
+    assert events == [
+        TextDelta("Tae "),
+        TextDelta("studied "),
+        TextDelta("at Vanderbilt."),
+        StreamDone(
+            model="served-model", finish_reason="stop", prompt_tokens=40, completion_tokens=5
+        ),
+    ]
+
+
+async def test_asks_for_a_stream_with_token_counts():
+    server = Server(sse(chunk("Hi", finish_reason="stop")))
+
+    await collect(client_for(server, reasoning_effort="none"), max_tokens=20)
+
+    body = server.body()
+    assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
+    assert body["max_tokens"] == 20
+    assert body["reasoning_effort"] == "none"
+
+
+async def test_hidden_reasoning_never_reaches_the_caller():
+    server = Server(
+        sse(
+            chunk(reasoning="Thinking Process: the user wants..."),
+            chunk(reasoning="so the answer is ready."),
+            chunk("ready", finish_reason="stop"),
+        )
+    )
+
+    events = await collect(client_for(server))
+
+    assert [e.text for e in events if isinstance(e, TextDelta)] == ["ready"]
+
+
+async def test_a_stream_without_usage_has_no_token_counts():
+    server = Server(sse(chunk("Hi", finish_reason="length")))
+
+    done = (await collect(client_for(server)))[-1]
+
+    assert done == StreamDone(model="served-model", finish_reason="length")
+
+
+async def test_opening_a_stream_is_retried_like_any_request(waits):
+    server = Server(error(503), sse(chunk("Recovered.", finish_reason="stop")))
+
+    events = await collect(client_for(server))
+
+    assert events[0] == TextDelta("Recovered.")
+    assert len(server.requests) == 2
+
+
+async def test_a_refused_stream_fails_at_once(waits):
+    server = Server(error(401, "bad key"))
+
+    with pytest.raises(ModelRequestError) as caught:
+        await collect(client_for(server))
+
+    assert caught.value.status_code == 401
+    assert len(server.requests) == 1
+
+
+async def test_a_stream_that_breaks_partway_is_unavailable_after_the_text_so_far():
+    async def body():
+        yield f"data: {json.dumps(chunk('Tae studied '))}\n\n".encode()
+        raise httpx2.ReadError("connection reset")
+
+    server = Server(
+        httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body())
+    )
+    received = []
+
+    with pytest.raises(ModelUnavailableError, match="broke partway"):
+        async for event in client_for(server).stream(HELLO):
+            received.append(event)
+
+    assert received == [TextDelta("Tae studied ")]
+
+
 # The fake, and building from settings
 
 
@@ -296,6 +439,18 @@ async def test_the_fake_replies_in_order_repeats_the_last_and_records_every_call
     assert len(fake.calls) == 3
 
 
+async def test_the_fake_streams_its_reply_in_pieces_that_join_back_up():
+    fake = FakeModelClient(["Tae studied at  Vanderbilt."])
+
+    events = await collect(fake)
+
+    deltas = [e.text for e in events if isinstance(e, TextDelta)]
+    assert len(deltas) > 1
+    assert "".join(deltas) == "Tae studied at  Vanderbilt."
+    assert events[-1] == StreamDone(model="fake", finish_reason="stop")
+    assert len(fake.calls) == 1
+
+
 def test_the_fake_needs_at_least_one_reply():
     with pytest.raises(ValueError):
         FakeModelClient([])
@@ -305,6 +460,7 @@ async def test_the_client_is_built_from_the_three_model_settings(monkeypatch):
     monkeypatch.setenv("MODEL_NAME", "llama-3.3-70b-instruct")
     monkeypatch.setenv("MODEL_BASE_URL", "http://hosted.test/v1")
     monkeypatch.setenv("MODEL_API_KEY", "hosted-key")
+    monkeypatch.setenv("MODEL_REASONING_EFFORT", "none")
     get_settings.cache_clear()
     server = Server(chat_response())
 
@@ -316,6 +472,7 @@ async def test_the_client_is_built_from_the_three_model_settings(monkeypatch):
     assert str(server.requests[0].url) == "http://hosted.test/v1/chat/completions"
     assert server.requests[0].headers["authorization"] == "Bearer hosted-key"
     assert server.body()["model"] == "llama-3.3-70b-instruct"
+    assert server.body()["reasoning_effort"] == "none"
 
 
 # The real endpoint, only with --run-llm
@@ -333,3 +490,20 @@ async def test_the_configured_model_answers():
 
     assert completion.text.strip()
     assert completion.finish_reason == "stop"
+
+
+@pytest.mark.llm
+async def test_the_configured_model_streams():
+    client = build_model_client(get_settings())
+    try:
+        events = [
+            event
+            async for event in client.stream(
+                [Message(role="user", content="Reply with one word: ready.")]
+            )
+        ]
+    finally:
+        await client.aclose()
+
+    assert any(isinstance(e, TextDelta) and e.text.strip() for e in events)
+    assert isinstance(events[-1], StreamDone)

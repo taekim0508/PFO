@@ -27,6 +27,8 @@ from portfolio_bot.generation.client import (
     ModelError,
     ModelRequestError,
     ModelUnavailableError,
+    StreamDone,
+    TextDelta,
     build_model_client,
 )
 from portfolio_bot.ingest.embedder import Embedder, SentenceTransformerEmbedder
@@ -120,6 +122,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ping_parser.add_argument(
         "--prompt", default=PING_PROMPT, help=f'What to send (default: "{PING_PROMPT}")'
+    )
+    ping_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Print the reply as it is written, and how long the first words took",
     )
 
     for name, (description, item) in PLANNED_COMMANDS.items():
@@ -395,46 +402,83 @@ def command_model(
     if args.model_command != "ping":
         print("Usage: pb model ping [--prompt TEXT]", file=sys.stderr)
         return 2
-    return asyncio.run(_ping(settings, args.prompt, client))
+    return asyncio.run(_ping(settings, args.prompt, client, stream=args.stream))
 
 
-async def _ping(settings: Settings, prompt: str, client: ModelClient | None) -> int:
+async def _ping(
+    settings: Settings, prompt: str, client: ModelClient | None, *, stream: bool = False
+) -> int:
     # Only a client built here is closed here; one passed in belongs to the caller.
     built = None
     if client is None:
         built = client = build_model_client(settings)
     print(f"{client.model_name} at {settings.model_base_url}")
+    messages = [Message(role="user", content=prompt)]
     started = time.perf_counter()
+    first_text: float | None = None
     try:
-        completion = await client.complete([Message(role="user", content=prompt)])
-    except ModelRequestError as error:
-        print(f"The endpoint refused the request: {error}", file=sys.stderr)
-        print("  Check MODEL_NAME and MODEL_API_KEY in .env.", file=sys.stderr)
-        return 1
-    except ModelUnavailableError as error:
-        print(f"Cannot get an answer from {settings.model_base_url}.", file=sys.stderr)
-        print(f"  {error}", file=sys.stderr)
-        print("  If this is Ollama, is it running? Try 'make model-up'.", file=sys.stderr)
-        return 1
+        if stream:
+            done: StreamDone | None = None
+            async for event in client.stream(messages):
+                if isinstance(event, TextDelta):
+                    if first_text is None:
+                        first_text = time.perf_counter() - started
+                        print("  reply:        ", end="", flush=True)
+                    # Kept on one line, like the non-streamed reply.
+                    print(event.text.replace("\n", " "), end="", flush=True)
+                else:
+                    done = event
+            if first_text is None:
+                print("  reply:        (empty)")
+            else:
+                print()
+            assert done is not None  # a stream always ends with StreamDone
+            model, finish_reason = done.model, done.finish_reason
+            prompt_tokens, completion_tokens = done.prompt_tokens, done.completion_tokens
+        else:
+            completion = await client.complete(messages)
+            print(f"  reply:        {' '.join(completion.text.split())}")
+            model, finish_reason = completion.model, completion.finish_reason
+            prompt_tokens, completion_tokens = (
+                completion.prompt_tokens,
+                completion.completion_tokens,
+            )
     except ModelError as error:
-        print(f"The endpoint answered, but not in a readable form: {error}", file=sys.stderr)
-        return 1
+        if first_text is not None:
+            print()  # end the half-written reply line before the error
+        return _report_model_error(settings, error)
     finally:
         if built is not None:
             await built.aclose()
     elapsed = time.perf_counter() - started
 
     tokens = (
-        f"{completion.prompt_tokens} in, {completion.completion_tokens} out"
-        if completion.prompt_tokens is not None and completion.completion_tokens is not None
+        f"{prompt_tokens} in, {completion_tokens} out"
+        if prompt_tokens is not None and completion_tokens is not None
         else "not reported"
     )
-    print(f"  reply:        {' '.join(completion.text.split())}")
-    print(f"  answered by:  {completion.model}")
-    print(f"  finish:       {completion.finish_reason}")
+    print(f"  answered by:  {model}")
+    print(f"  finish:       {finish_reason}")
     print(f"  tokens:       {tokens}")
+    if stream:
+        shown = f"{first_text:.2f}s" if first_text is not None else "no text"
+        print(f"  first words:  {shown}")
     print(f"  latency:      {elapsed:.2f}s")
     return 0
+
+
+def _report_model_error(settings: Settings, error: ModelError) -> int:
+    """Explain a failed model call on stderr, naming what to check. Returns 1."""
+    if isinstance(error, ModelRequestError):
+        print(f"The endpoint refused the request: {error}", file=sys.stderr)
+        print("  Check MODEL_NAME and MODEL_API_KEY in .env.", file=sys.stderr)
+    elif isinstance(error, ModelUnavailableError):
+        print(f"Cannot get an answer from {settings.model_base_url}.", file=sys.stderr)
+        print(f"  {error}", file=sys.stderr)
+        print("  If this is Ollama, is it running? Try 'make model-up'.", file=sys.stderr)
+    else:
+        print(f"The endpoint answered, but not in a readable form: {error}", file=sys.stderr)
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -467,16 +511,22 @@ def main(argv: list[str] | None = None) -> int:
     logger = get_logger(__name__)
     logger.debug("running command", extra={"command": args.command})
 
-    if args.command == "migrate":
-        return command_migrate(settings)
-    if args.command == "ingest":
-        return command_ingest(settings, args)
-    if args.command == "search":
-        return command_search(settings, args)
-    if args.command == "eval":
-        return command_eval(settings, args)
-    if args.command == "model":
-        return command_model(settings, args)
+    # Ctrl-C is how a person stops a slow model or a long ingest. It gets a one-line
+    # message and the conventional exit code, not a traceback from inside the event loop.
+    try:
+        if args.command == "migrate":
+            return command_migrate(settings)
+        if args.command == "ingest":
+            return command_ingest(settings, args)
+        if args.command == "search":
+            return command_search(settings, args)
+        if args.command == "eval":
+            return command_eval(settings, args)
+        if args.command == "model":
+            return command_model(settings, args)
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return 130
 
     description, item = PLANNED_COMMANDS[args.command]
     print(f"pb {args.command}: not implemented yet.")

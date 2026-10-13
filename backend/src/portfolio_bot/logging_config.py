@@ -68,8 +68,10 @@ def configure_logging(settings: Settings | None = None) -> None:
     root.setLevel(settings.log_level.upper())
 
     # Loading the embedding model logs every HTTP request Hugging Face makes to check the
-    # pinned revision. Their warnings still come through.
-    for noisy in ("httpx", "sentence_transformers"):
+    # pinned revision, and the model SDK's HTTP library (httpx2) logs one line per model
+    # call, which lands in the middle of a streamed reply. Their warnings still come
+    # through, and the SDK's own "Retrying request" lines stay visible.
+    for noisy in ("httpx", "httpx2", "sentence_transformers"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
