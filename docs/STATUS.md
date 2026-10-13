@@ -425,6 +425,15 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - 352 backend tests, 4 skipped; 7 frontend tests. `make lint` clean on both halves.
   `next build` succeeds with `/` prerendered static.
 
+**Cut-off streams are errors.**
+
+- A stream that ends without a `finish_reason` now raises `ModelUnavailableError` after
+  the text already sent, instead of ending as if finished. The API turns that into an
+  `error` event, so a visitor sees what arrived plus "The model isn't answering right
+  now" rather than half an answer presented as whole. Found by the answer check (see
+  Findings); the new test was verified red by removing the check.
+- 353 tests, 4 skipped; `--run-llm` passes against `qwen3.5:9b`. `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry

@@ -382,6 +382,18 @@ async def test_hidden_reasoning_never_reaches_the_caller():
     assert [e.text for e in events if isinstance(e, TextDelta)] == ["ready"]
 
 
+async def test_a_stream_that_ends_without_a_finish_reason_was_cut_off():
+    # What Ollama once sent: some text, then the end of the stream, nothing to say why.
+    server = Server(sse(chunk("Tae interned as a "), chunk("software")))
+    received = []
+
+    with pytest.raises(ModelUnavailableError, match="ended before the model finished"):
+        async for event in client_for(server).stream(HELLO):
+            received.append(event)
+
+    assert received == [TextDelta("Tae interned as a "), TextDelta("software")]
+
+
 async def test_a_stream_without_usage_has_no_token_counts():
     server = Server(sse(chunk("Hi", finish_reason="length")))
 
