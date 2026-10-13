@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     # stored text, so left in it pulls questions toward the one title that carries it.
     subject_names: tuple[str, ...] = ("Tae Kim", "Tae")
 
+    # Generation. The most passage text one answer is given, in estimated tokens (a quarter
+    # of the characters). Ollama runs qwen3.5 with a 4096-token window by default, which
+    # also has to hold the instructions, the question, and the answer, so this stays well
+    # under it. Five retrieved chunks typically use about half of it.
+    context_token_budget: int = 2500
+
     # Generation. These three are what make the model layer provider-agnostic: Ollama,
     # Together, Groq, and Fireworks all speak the same shape, so switching is config.
     model_name: str = "qwen3.5:9b"

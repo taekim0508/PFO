@@ -88,6 +88,7 @@ def test_log_format_rejects_anything_but_console_or_json(monkeypatch):
         ("top_k", 5),
         ("rrf_k", 60),
         ("subject_names", ("Tae Kim", "Tae")),
+        ("context_token_budget", 2500),
         ("embedding_model_name", "BAAI/bge-small-en-v1.5"),
         ("embedding_model_revision", "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"),
         ("model_name", "qwen3.5:9b"),
