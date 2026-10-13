@@ -49,8 +49,8 @@ questions:
     ]
 
 
-def test_the_committed_starter_file_loads():
-    assert load_questions(REPO_ROOT / "eval" / "retrieval.yaml") == []
+def test_the_committed_question_set_loads_and_meets_the_roadmap_minimum():
+    assert len(load_questions(REPO_ROOT / "eval" / "retrieval.yaml")) >= 30
 
 
 def test_reports_every_problem_at_once_naming_each_entry(tmp_path):

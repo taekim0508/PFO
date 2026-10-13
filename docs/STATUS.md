@@ -201,8 +201,7 @@ Retrieval 3.1 to 3.5 are built. 3.6, the evaluation harness, is what says which 
 **Retrieval evaluation (3.6, harness only).**
 
 - `eval/retrieval.yaml` is the question set: each entry a `question`, one or more
-  `expected` sections (`education.md > Degrees and dates`), and an optional `note`. It
-  holds the format and no questions; Tae writes those.
+  `expected` sections (`education.md > Degrees and dates`), and an optional `note`.
 - `evaluation/questions.py` loads and checks it, reporting every problem at once by entry.
   `evaluation/metrics.py` has `recall_at_k`, `reciprocal_rank`, `precision_at_k`, pure
   functions over sections. `evaluation/runner.py` refuses an expected section no stored
@@ -214,6 +213,24 @@ Retrieval 3.1 to 3.5 are built. 3.6, the evaluation harness, is what says which 
   settings. `eval/` added to the CLAUDE.md layout.
 - 213 tests, 2 skipped (`--run-model`). `make lint` clean.
 
+**Retrieval evaluation (3.6, question set and result).**
+
+- `eval/retrieval.yaml` holds 106 questions, drafted by Claude Code and reviewed by Tae.
+  Every content file is covered, including recruiter questions (projects, experience,
+  degree, stack, leadership, location, start date, work authorization).
+- 34 questions name Tae, and each is followed by a pronoun twin identical except for
+  "he", "his", or "him", with the same expected sections. Six pairs also have a "you"
+  twin. The notes mark which is which, so the pairs isolate what the name alone does.
+- `content/job-search.md` added from Tae's own facts: roles sought, location and
+  relocation, start date, work authorization. Its title leaves out the name on purpose.
+  Corpus is now 9 documents, 79 chunks.
+- `pb eval compare` result in Findings. Hybrid leads on every metric.
+- The test asserting the committed eval file was empty now asserts it loads with at least
+  thirty questions, the roadmap's minimum. 213 tests, 2 skipped (`--run-model`). `make lint`
+  clean.
+
+Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -221,7 +238,7 @@ is not a problem to solve, it is a thing that was set down.
 
 | Item | Where it stopped | Branch |
 |---|---|---|
-| Retrieval evaluation (3.6) | Harness built. Waiting for Tae's 30 to 50 questions in `eval/retrieval.yaml`, then `pb eval compare` and the result into Findings | `retrieval-eval` |
+| Nothing in progress | | |
 
 ## Decisions
 
@@ -282,6 +299,7 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D48 | Equal fused scores are broken by chunk id | Symmetric ranks (1st and 2nd against 2nd and 1st) tie exactly; any fixed rule beats an order that varies by run. Note it is arbitrary, not a judgment of which chunk is better |
 | D49 | Eval answers are sections, not chunks, and a section covers everything beneath it | Chunk ids change on every ingest, and chunk size is one of the things 3.6 exists to compare; a section survives both |
 | D50 | precision@k divides by k, not by how many results came back | A strategy returning two chunks for k=5 should not get perfect precision for getting both right |
+| D51 | The bot speaks as a close friend answering on Tae's behalf, in the third person, not as Tae | Tae's call. Eval questions are mostly third person ("Tae", "he"), with a few "you" twins for visitors who address the bot as Tae anyway |
 
 ## Open items
 
@@ -291,7 +309,7 @@ things noticed while doing something else that would otherwise be lost.
 | Item | Where it belongs |
 |---|---|
 | No LICENSE file. Not requested anywhere in the roadmap | 0.1 or 8.5 |
-| Chunking constants (1000 and 150 characters) are conventional starting values, not measured ones | 3.6 |
+| Chunking constants (1000 and 150 characters) are conventional starting values, not measured ones. Measurable now: `pb ingest --force` with other values, then `pb eval compare` | 8.x, or whenever retrieval is revisited |
 | Nothing enforces that `DATABASE_URL` and the `POSTGRES_*` values in `.env` agree | 0.4, if drift ever bites |
 | Nothing rolls a migration back. Forward-only is fine for now; there is no `pb migrate --down` | Not requested anywhere; raise if it ever matters |
 | The GIN index covers `chunks.text` alone. Headings are searchable only where the chunk body repeats them | 3.2, if the lexical arm turns out to want them |
@@ -303,7 +321,8 @@ things noticed while doing something else that would otherwise be lost.
 | The pool's "opened" and "closed" INFO lines print around every `pb search` result | Cosmetic; 8.x |
 | The other-model check reads every row of `chunk_embeddings` on every search. Free at 76 rows, not at a much larger corpus | Move to once per process or into ingest if the corpus grows |
 | Two chunks are a heading and nothing else (`Revisiting the project for this review`, `What I built: an explainable traffic signal controller`), produced when a heading is followed directly by subheadings. They are noise in every search | 2.3, the chunker |
-| A question naming Tae is pulled toward `about.md`, whose title "About Tae Kim" is embedded with every chunk (see Findings) | 3.3 and 3.6 first; then D35 or the corpus titles, if the numbers say so |
+| A question naming Tae is pulled toward `about.md`, whose title "About Tae Kim" is embedded with every chunk. Measured on 2026-10-12 (see Findings). Candidate fixes, none built: drop the title from `about.md`'s embedded text, retitle the file, or remove the name from the question before embedding it. The 34 twin pairs are the test for any of them | Its own unit, touching 2.4 or 3.2 |
+| The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
 
 ## Findings
 
@@ -399,3 +418,43 @@ same-length edit, then restoring it within the same second, left Python's cached
 looking current (it compares modification time and size), so the suite kept running the
 broken version after the restore. Clear `__pycache__` after restoring a source file, or a
 red check can produce false reds and, worse, false greens.
+
+**2026-10-12, the evaluation table: hybrid leads, by a small margin.** `pb eval compare`
+on 106 questions, k=5, the real corpus (9 documents, 79 chunks):
+
+| strategy | recall@5 | MRR | precision@5 |
+|---|---|---|---|
+| dense | 0.772 | 0.646 | 0.238 |
+| lexical | 0.621 | 0.522 | 0.181 |
+| hybrid | 0.815 | 0.674 | 0.245 |
+
+Hybrid beats dense by 0.043 recall and 0.028 MRR, roughly four or five questions out of
+106. Lexical alone trails both. Precision is low for
+every strategy because of the shape of the set, not the retrievers: most questions expect
+one section of one or two chunks, so 0.2 to 0.4 is the ceiling there. Read precision only
+as a comparison between rows.
+
+**2026-10-12, the name costs dense search, and hybrid's lead comes mostly from repairing
+it.** Splitting the same run by how the question refers to Tae (34 name questions, their
+34 pronoun twins, 6 "you" twins, 32 others):
+
+| strategy | name: recall / MRR | pronoun: recall / MRR | other: recall / MRR |
+|---|---|---|---|
+| dense | 0.662 / 0.521 | 0.806 / 0.758 | 0.875 / 0.682 |
+| lexical | 0.635 / 0.552 | 0.635 / 0.552 | 0.641 / 0.485 |
+| hybrid | 0.776 / 0.674 | 0.782 / 0.716 | 0.891 / 0.662 |
+
+In dense, swapping "Tae" for "he" moves the right section up in 14 of 34 pairs and down
+in 2. The reason: no chunk's text contains "Tae". Only the title "About Tae Kim" does, and
+D35 embeds it with each of `about.md`'s five chunks, so the name pulls a question toward
+those five whatever it asks. An earlier 12-question check put `about.md` in 45 of 60
+dense top-5 slots when questions said "Tae", and 9 when they said "he". Lexical is
+untouched: "he", "his", and "you" are stop words, and "tae" matches no chunk.
+
+Hybrid closes most of the gap (7 pairs better with "he", 2 worse), and that is where most
+of its overall lead comes from. On pronoun questions, dense alone is slightly better than
+hybrid (MRR 0.758 against 0.716). So hybrid is the right default as things stand, but
+partly because it compensates for a defect in what dense embeds. If the name problem is
+fixed at the source, this comparison should be rerun before assuming hybrid still leads.
+Six "you" twins are too few to conclude anything; in dense they mostly ranked with "he".
+
