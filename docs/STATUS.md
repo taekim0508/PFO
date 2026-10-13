@@ -425,6 +425,104 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - 352 backend tests, 4 skipped; 7 frontend tests. `make lint` clean on both halves.
   `next build` succeeds with `/` prerendered static.
 
+**Cut-off streams are errors.**
+
+- A stream that ends without a `finish_reason` now raises `ModelUnavailableError` after
+  the text already sent, instead of ending as if finished. The API turns that into an
+  `error` event, so a visitor sees what arrived plus "The model isn't answering right
+  now" rather than half an answer presented as whole. Found by the answer check (see
+  Findings); the new test was verified red by removing the check.
+- 353 tests, 4 skipped; `--run-llm` passes against `qwen3.5:9b`. `make lint` clean.
+
+**Frontend chat (6.4, 6.5).**
+
+- `src/lib/sse.ts`: an incremental Server-Sent Events parser. It emits every complete
+  event, holds partial ones across chunks, and handles `\n`, `\r\n`, and `\r`, including a
+  `\r\n` split between two chunks (a bug its own test caught). It also handles comments,
+  multi-line data, and a final event without a trailing blank line.
+- `src/lib/chatApi.ts`: `streamChat` POSTs to `/api/chat` with `fetch` and reads the
+  body as a stream, so each event reaches the page as the server writes it, decoding
+  UTF-8 split across chunks. Event payloads are typed to mirror the API schemas.
+  Failures:
+  - A refusal becomes `ChatRequestError` with a showable message: rate limited (with
+    Retry-After), invalid, network, or server.
+  - Stop's abort passes through untouched, so it is never reported as a failure.
+  - Unknown events and malformed frames are skipped.
+- `src/lib/useConversation.ts`: turns, one streaming at a time.
+  - Sources, then deltas, then done or error.
+  - Stop aborts the request and marks the turn "stopped".
+  - A stream that closes without done or error is marked cut off.
+  - The API keeps no history, so each question stands alone.
+- The chat UI:
+  - Questions as small gray labels, answers as editorial text, hairlines between turns,
+    no bubbles.
+  - "Looking through Tae's writing…" until the first words, then a caret while
+    streaming.
+  - `AnswerText` renders paragraphs, short lists, bold, and `[n]` citations as small
+    buttons. Nothing from the model is inserted as HTML, and a citation to a passage
+    that was not given stays plain text.
+  - Errors show their sentence and Try again.
+  - Follow-up chips after the last finished answer.
+  - The input is pinned to the bottom once the conversation starts, with Stop in place
+    of Send while streaming.
+  - It follows the stream unless the reader has scrolled up.
+  - The answer region is `aria-live` with `aria-busy` while streaming.
+- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`) points the site at the API.
+- Checked in Chrome against the real API and `qwen3.5:9b` at localhost:3100: "What did
+  Tae build at Abroadly?" streamed a cited third-person answer with follow-up chips.
+  Port 3000 was held by another of Tae's Next apps, so the API ran with
+  `CORS_ORIGINS=["http://localhost:3100"]` for the check.
+- 353 backend tests, 4 skipped; 32 frontend tests. `make lint` clean. `next build` passes.
+
+**Frontend projects, case studies, sources, accessibility (6.3, 6.6, 6.7).**
+
+- `src/lib/content.ts` reads `content/*.md` (the corpus itself) at build time, at module
+  scope in `page.tsx`, so `/` stays fully static. `src/lib/projects.ts` holds the five
+  projects, strongest first (D64).
+  - Each card line (context, problem, Tae's role, tags) is drawn from the write-up.
+  - Each case-study heading (Problem, Tae's contribution, Architecture, Key decisions
+    and tradeoffs, Validation, Results) names the write-up's own sections to show
+    under it.
+  - An empty list shows a marked "Placeholder" instead of filler.
+  - `toProjectView` fails the build if a named file or heading is missing. A vitest
+    test checks every mapping against the real corpus and that no section is used twice.
+- "Explore my projects" and the navbar's Work show all five cards as a turn the page
+  writes itself, with no model call, scrolled to its own top. An answer gets cards only
+  for projects it cited (at most two), or the top passage's project when it cited
+  nothing. Follow-up chips come from the lead project, else a general set.
+- The case study opens on a card:
+  - Wide screens: a panel to the right of the conversation, which moves over to keep
+    the question visible.
+  - Phones: a full-screen sheet; the page behind it is `inert` until it closes.
+  - Focus moves to its heading, Escape or Close shuts it, and focus returns to the card.
+  - Its text is the write-up, in Tae's first person, with a line saying so.
+- Sources panel (6.6), collapsed under each answer. Each passage shows its number,
+  location, `cited` mark, score, each search's rank (`dense #1`), file, and an excerpt.
+  Below them: retrieval, first-words, and total time, the model, the prompt version, and
+  any invented citation numbers. Clicking a citation marker opens it and centres and
+  highlights that passage.
+- 6.7:
+  - Everything is a button or link reachable by keyboard, with one orange focus
+    outline.
+  - The base styles moved into `@layer base`, because unlayered they beat every utility
+    (the question box showed a second focus ring).
+  - The navbar background is the opaque surface, since the 55% one let scrolled text
+    show through behind the links.
+  - Live region and contrast as in the earlier units.
+- Checked in Chrome against the real API and model: overview, two-column case study,
+  dark mode, a cited answer, citation to sources. Not checked by eye at phone width: the
+  window would not resize. That layout is covered by the responsive classes and by tests
+  of the menu and the inert sheet.
+- 353 backend tests, 4 skipped; 48 frontend tests. `make lint` clean. `next build`
+  passes with `/` static.
+
+**README (8.5).**
+
+- `README.md` rewritten for someone opening the repository cold: what the project is, how
+  a question is answered (a step diagram), the measured retrieval and answer results with
+  what they changed, the decisions worth knowing, how to run it locally, and the layout.
+  Every number in it is from Findings. It says plainly that nothing is deployed yet.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -506,6 +604,7 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D61 | Rate limiting is in process memory, by client IP, checked before streaming | One machine, one worker is the whole site (7.3). A second instance needs a shared store, and behind a proxy the IP must come from the proxy's header (see Open items) |
 | D62 | The chat speaks as the friend (D51); the site's own copy (headline, intro, chips, placeholder) speaks as Tae, as the design brief wrote it, with one line under the input saying who answers | Tae's call, keeping the brief's voice while making the switch of speaker explicit to a visitor |
 | D63 | Secondary text is #6E6B78 and orange text and focus outlines are #C2410C (dark: #A39DA8, #FF5F33), instead of the brief's #9896A3 and #FF5F33 | The brief asks for WCAG AA and its two values measure 2.85:1 and 2.97:1 on the cream; same hues, darker shades, brief values kept for decoration and fills |
+| D64 | Case studies show Tae's write-up sections under the brief's six headings, chosen in `projects.ts`, rather than summaries written for the site | One source of truth with the chatbot, nothing invented, and a renamed heading fails the build; the cost is first-person text on a page the brief titles "Tae's contribution" |
 
 ## Open items
 
@@ -533,6 +632,10 @@ things noticed while doing something else that would otherwise be lost.
 | The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
 | The rate limit keys on `request.client.host`. Behind Fly's proxy every request would share the proxy's address, so the deploy must read the client IP from the proxy's header (Fly sends `Fly-Client-IP`) | 7.3 |
 | `CHAT_DEADLINE_SECONDS` is 60 for a laptop that reloads the model after idle. A hosted model answers in a few seconds; 20 to 30 is the production value | 7.3 |
+| `content/personal-portfolio-chatbot.md` says retrieval, generation, and evaluation are "not yet fully implemented". All three now run, so the chatbot and its case study describe the project as less finished than it is | Tae, in the write-up |
+| The case studies have marked placeholders where a write-up says nothing: the chatbot's contribution, validation, and results, and FollowThru's results | Tae, in the write-ups; `projects.ts` then names the new sections |
+| `make dev` serves the site on port 3000, which another of Tae's apps was holding on 2026-10-13. Use `cd frontend && npx next dev -p 3100` with `CORS_ORIGINS=["http://localhost:3100"]` in `.env` | Only if it keeps colliding |
+| Typed follow-ups such as "what went wrong?" carry no context, since each question is answered alone. Conversation memory is deferred in the roadmap because it changes retrieval | 4.x or 5.x, when wanted |
 
 ## Findings
 

@@ -12,7 +12,8 @@ of tokens mid-answer and the text is cut off.
 
 `stream` yields the reply as it is written, so a reader sees the first words long before
 the last. A streamed reply cannot be retried once text has gone out, so retries cover only
-opening the stream; a stream that breaks partway raises `ModelUnavailableError`.
+opening the stream; a stream that breaks partway, or ends without saying why the model
+stopped, raises `ModelUnavailableError` after the text already sent.
 
 Some models write hidden reasoning before the answer. Endpoints that support it report
 that in a separate field, which this client ignores, so callers only ever see the answer.
@@ -242,6 +243,12 @@ class OpenAICompatibleClient:
             raise ModelUnavailableError(f"the reply stream broke partway: {error}") from error
         finally:
             await chunks.close()
+
+        # Every chat-completions stream ends by saying why the model stopped. One that
+        # simply ends was cut off (seen once from Ollama, mid-sentence), and passing it on
+        # as finished would show a visitor half an answer as if it were whole.
+        if finish_reason is None:
+            raise ModelUnavailableError("the reply stream ended before the model finished")
 
         yield StreamDone(
             model=model,
