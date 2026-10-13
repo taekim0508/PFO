@@ -13,13 +13,15 @@ type NavbarProps = {
   onHome: () => void;
   /** False until frontend/public/resume.pdf exists; the link then shows as a placeholder. */
   hasResume: boolean;
+  /** True while a full-screen sheet covers the page. */
+  inert?: boolean;
 };
 
 const linkClass =
   "rounded-full px-3 py-1.5 text-sm text-ink transition-colors hover:bg-peach-tint hover:text-accent-strong";
 
 /** A floating translucent pill that stays put on scroll. Collapses to a menu on phones. */
-export function Navbar({ onWork, onHome, hasResume }: NavbarProps) {
+export function Navbar({ onWork, onHome, hasResume, inert = false }: NavbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
 
@@ -56,10 +58,10 @@ export function Navbar({ onWork, onHome, hasResume }: NavbarProps) {
   );
 
   return (
-    <header className="fixed inset-x-0 top-3 z-40 px-4 sm:top-4">
+    <header className="fixed inset-x-0 top-3 z-40 px-4 sm:top-4" inert={inert}>
       <nav
         aria-label="Main"
-        className="glass mx-auto flex max-w-5xl items-center justify-between gap-2 rounded-full py-1.5 pr-1.5 pl-4"
+        className="glass mx-auto flex max-w-5xl items-center justify-between gap-2 rounded-full bg-surface-strong! py-1.5 pr-1.5 pl-4"
       >
         <button
           type="button"

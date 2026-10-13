@@ -1,8 +1,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { readWriteups } from "@/lib/content";
+import { toProjectView } from "@/lib/projectView";
+import { PROJECTS } from "@/lib/projects";
 import { AnswerText } from "../AnswerText";
 import { IndexApp } from "../IndexApp";
+
+const writeups = readWriteups();
+const projects = PROJECTS.map((project) => toProjectView(project, writeups));
+
+function app(fetchImpl: typeof fetch) {
+  return render(<IndexApp hasResume={false} projects={projects} fetchImpl={fetchImpl} />);
+}
 
 const PASSAGE = {
   label: 1,
@@ -58,11 +68,11 @@ describe("the chat", () => {
       frame("delta", { text: "in May 2026 [1]." }),
       frame("done", DONE),
     ]);
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     await askThroughTheBox("Where did Tae go to school?");
 
-    const turn = await screen.findByRole("listitem");
+    const [turn] = await screen.findAllByRole("listitem");
     expect(within(turn).getByText("Where did Tae go to school?")).toBeInTheDocument();
     await waitFor(() =>
       expect(turn).toHaveTextContent("Tae graduated from Vanderbilt in May 2026"),
@@ -73,7 +83,7 @@ describe("the chat", () => {
 
   it("asks a suggestion chip's question", async () => {
     const fetchImpl = answering([frame("done", DONE)]);
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     fireEvent.click(screen.getByRole("button", { name: "How I solve problems" }));
 
@@ -87,7 +97,7 @@ describe("the chat", () => {
       frame("sources", { strategy: "dense", passages: [] }),
       frame("error", { code: "model_unavailable", message: "The model isn't answering." }),
     ]);
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     await askThroughTheBox("Hello?");
 
@@ -102,7 +112,7 @@ describe("the chat", () => {
         status: 429,
       }),
     );
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     await askThroughTheBox("q");
 
@@ -111,7 +121,7 @@ describe("the chat", () => {
 
   it("calls a stream that closes without done or error cut off", async () => {
     const fetchImpl = answering([frame("delta", { text: "Tae interned as a" })]);
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     await askThroughTheBox("Where did he intern?");
 
@@ -127,7 +137,7 @@ describe("the chat", () => {
           );
         }),
     );
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     await askThroughTheBox("A slow question");
     await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Stop" })));
@@ -138,7 +148,7 @@ describe("the chat", () => {
 
   it("does not send an empty question", async () => {
     const fetchImpl = vi.fn();
-    render(<IndexApp hasResume={false} fetchImpl={fetchImpl} />);
+    app(fetchImpl);
 
     await askThroughTheBox("   ");
 
@@ -167,5 +177,146 @@ describe("AnswerText", () => {
     fireEvent.click(screen.getByRole("button", { name: "Source 2" }));
     expect(onCite).toHaveBeenCalledWith(2);
     expect(screen.queryByRole("button", { name: "Source 9" })).toBeNull();
+  });
+});
+
+const ABROADLY_PASSAGE = {
+  ...PASSAGE,
+  label: 1,
+  title: "Abroadly, Study Abroad Review Platform",
+  heading_path: ["What I built and owned"],
+  source_path: "abroadly.md",
+  location: "Abroadly, Study Abroad Review Platform > What I built and owned",
+  text: "## What I built and owned\n\nMy own features were peer messaging and bookmarking.",
+};
+
+function abroadlyAnswer() {
+  return answering([
+    frame("sources", { strategy: "dense", passages: [ABROADLY_PASSAGE, { ...PASSAGE, label: 2 }] }),
+    frame("delta", { text: "Tae built messaging and bookmarking [1]." }),
+    frame("done", { ...DONE, cited: [1] }),
+  ]);
+}
+
+describe("projects, case studies, and sources", () => {
+  it("shows every project, strongest first, without asking the model", async () => {
+    const fetchImpl = vi.fn();
+    app(fetchImpl);
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore my projects" }));
+
+    const cards = within(await screen.findByLabelText("Related projects")).getAllByRole("button");
+    expect(cards.map((c) => c.querySelector(".font-serif")?.textContent)).toEqual(
+      projects.map((p) => p.name),
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("puts the cited project's card under the answer, with its follow-ups", async () => {
+    app(abroadlyAnswer());
+
+    await askThroughTheBox("What did Tae build at Abroadly?");
+
+    const related = await screen.findByLabelText("Related projects");
+    expect(within(related).getAllByRole("button")).toHaveLength(1);
+    expect(related).toHaveTextContent("Abroadly");
+    const abroadly = projects.find((p) => p.slug === "abroadly")!;
+    expect(screen.getByLabelText("Suggested questions")).toHaveTextContent(abroadly.followUps[0]);
+  });
+
+  it("opens the case study from a card, closes it with Escape, and returns focus", async () => {
+    app(vi.fn());
+    fireEvent.click(screen.getByRole("button", { name: "Explore my projects" }));
+    const card = within(await screen.findByLabelText("Related projects")).getAllByRole("button")[2];
+
+    fireEvent.click(card);
+
+    const panel = screen.getByRole("complementary", { name: "Abroadly" });
+    expect(within(panel).getByRole("heading", { name: "Abroadly" })).toHaveFocus();
+    expect(within(panel).getByText("Why magic links instead of passwords")).toBeInTheDocument();
+    expect(panel).toHaveTextContent("Tae's contribution");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(card).toHaveFocus();
+  });
+
+  it("marks a heading the write-up does not cover as a placeholder", async () => {
+    app(vi.fn());
+    fireEvent.click(screen.getByRole("button", { name: "Explore my projects" }));
+    const cards = within(await screen.findByLabelText("Related projects")).getAllByRole("button");
+
+    fireEvent.click(cards[1]); // the chatbot: its write-up has no validation or results yet
+
+    const panel = screen.getByRole("complementary");
+    expect(within(panel).getAllByText("Placeholder").length).toBeGreaterThan(0);
+  });
+
+  it("opens the sources at the passage a citation points to", async () => {
+    app(abroadlyAnswer());
+    await askThroughTheBox("What did Tae build at Abroadly?");
+    const toggle = await screen.findByRole("button", { name: /Sources · 2 passages/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Source 1" }));
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const passage = document.querySelector('[data-label="1"]')!;
+    expect(passage).toHaveTextContent("What I built and owned");
+    expect(passage).toHaveTextContent("cited");
+    expect(passage).toHaveTextContent("dense #1");
+    expect(passage.className).toContain("bg-peach-tint");
+  });
+});
+
+describe("related project cards", () => {
+  it("show only projects the answer cited", async () => {
+    const fetchImpl = answering([
+      frame("sources", {
+        strategy: "dense",
+        passages: [
+          ABROADLY_PASSAGE,
+          { ...ABROADLY_PASSAGE, label: 2, source_path: "followthru.md" },
+        ],
+      }),
+      frame("delta", { text: "Composite indexes [1]." }),
+      frame("done", { ...DONE, cited: [1] }),
+    ]);
+    app(fetchImpl);
+
+    await askThroughTheBox("How did Tae fix the slow query?");
+
+    const related = await screen.findByLabelText("Related projects");
+    expect(related).toHaveTextContent("Abroadly");
+    expect(related).not.toHaveTextContent("FollowThru");
+  });
+});
+
+describe("the case study on a phone", () => {
+  it("takes the page behind it out of the tab order", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      app(vi.fn());
+      fireEvent.click(screen.getByRole("button", { name: "Explore my projects" }));
+      const card = within(await screen.findByLabelText("Related projects")).getAllByRole(
+        "button",
+      )[0];
+
+      fireEvent.click(card);
+
+      expect(card.closest("[inert]")).not.toBeNull();
+      expect(screen.getByRole("banner")).toHaveAttribute("inert");
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(card.closest("[inert]")).toBeNull();
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });

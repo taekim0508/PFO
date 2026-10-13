@@ -68,33 +68,37 @@
   --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
 }
 
-html {
-  background: var(--bg-edge);
-}
+/* Element defaults sit in the base layer, so a utility class on an element can override
+   them; unlayered rules would beat every utility. */
+@layer base {
+  html {
+    background: var(--bg-edge);
+  }
 
-/* Warm light, not a visible gradient. Fixed, so it stays put while content scrolls. */
-body {
-  min-height: 100dvh;
-  color: var(--ink);
-  font-family: var(--font-sans);
-  background: radial-gradient(
-      120% 90% at 50% 35%,
-      var(--bg-center) 0%,
-      var(--bg-mid) 55%,
-      var(--bg-edge) 100%
-    )
-    fixed;
-}
+  /* Warm light, not a visible gradient. Fixed, so it stays put while content scrolls. */
+  body {
+    min-height: 100dvh;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    background: radial-gradient(
+        120% 90% at 50% 35%,
+        var(--bg-center) 0%,
+        var(--bg-mid) 55%,
+        var(--bg-edge) 100%
+      )
+      fixed;
+  }
 
-::selection {
-  background: var(--peach);
-  color: #1a1a1a;
-}
+  ::selection {
+    background: var(--peach);
+    color: #1a1a1a;
+  }
 
-/* One focus style everywhere: a visible orange outline that clears AA as a non-text cue. */
-:focus-visible {
-  outline: 2px solid var(--accent-strong);
-  outline-offset: 2px;
+  /* One focus style everywhere: a visible orange outline that clears AA as a non-text cue. */
+  :focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+  }
 }
 
 /* Small uppercase tracked labels for metadata, e.g. "BACKEND · AI". */
