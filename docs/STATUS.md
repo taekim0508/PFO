@@ -434,6 +434,46 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
   Findings); the new test was verified red by removing the check.
 - 353 tests, 4 skipped; `--run-llm` passes against `qwen3.5:9b`. `make lint` clean.
 
+**Frontend chat (6.4, 6.5).**
+
+- `src/lib/sse.ts`: an incremental Server-Sent Events parser. It emits every complete
+  event, holds partial ones across chunks, and handles `\n`, `\r\n`, and `\r`, including a
+  `\r\n` split between two chunks (a bug its own test caught). It also handles comments,
+  multi-line data, and a final event without a trailing blank line.
+- `src/lib/chatApi.ts`: `streamChat` POSTs to `/api/chat` with `fetch` and reads the
+  body as a stream, so each event reaches the page as the server writes it, decoding
+  UTF-8 split across chunks. Event payloads are typed to mirror the API schemas.
+  Failures:
+  - A refusal becomes `ChatRequestError` with a showable message: rate limited (with
+    Retry-After), invalid, network, or server.
+  - Stop's abort passes through untouched, so it is never reported as a failure.
+  - Unknown events and malformed frames are skipped.
+- `src/lib/useConversation.ts`: turns, one streaming at a time.
+  - Sources, then deltas, then done or error.
+  - Stop aborts the request and marks the turn "stopped".
+  - A stream that closes without done or error is marked cut off.
+  - The API keeps no history, so each question stands alone.
+- The chat UI:
+  - Questions as small gray labels, answers as editorial text, hairlines between turns,
+    no bubbles.
+  - "Looking through Tae's writing…" until the first words, then a caret while
+    streaming.
+  - `AnswerText` renders paragraphs, short lists, bold, and `[n]` citations as small
+    buttons. Nothing from the model is inserted as HTML, and a citation to a passage
+    that was not given stays plain text.
+  - Errors show their sentence and Try again.
+  - Follow-up chips after the last finished answer.
+  - The input is pinned to the bottom once the conversation starts, with Stop in place
+    of Send while streaming.
+  - It follows the stream unless the reader has scrolled up.
+  - The answer region is `aria-live` with `aria-busy` while streaming.
+- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`) points the site at the API.
+- Checked in Chrome against the real API and `qwen3.5:9b` at localhost:3100: "What did
+  Tae build at Abroadly?" streamed a cited third-person answer with follow-up chips.
+  Port 3000 was held by another of Tae's Next apps, so the API ran with
+  `CORS_ORIGINS=["http://localhost:3100"]` for the check.
+- 353 backend tests, 4 skipped; 32 frontend tests. `make lint` clean. `next build` passes.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
