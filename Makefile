@@ -94,5 +94,7 @@ migrate:
 ingest:
 	cd $(BACKEND) && $(UV) run pb ingest
 
+# The API on :8000, reloading on source changes. create_app is a factory, so importing
+# the module reads no settings. The frontend joins this target in 6.1.
 dev:
-	@echo "Nothing to do yet: the API lands in roadmap item 5.1, the frontend in 6.1."
+	cd $(BACKEND) && $(UV) run uvicorn portfolio_bot.api.app:create_app --factory --reload --port 8000

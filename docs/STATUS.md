@@ -345,6 +345,45 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
   was silently skipped. They now check the marker itself.
 - 331 tests, 4 skipped (the real-model tests). `make lint` clean.
 
+**HTTP API (5.1 to 5.6).**
+
+- `api/app.py`: `create_app(settings, *, embedder, client, clock)`, a factory, so
+  importing it reads nothing. At startup:
+  - Configure logging.
+  - Open the pool, failing fast (D30).
+  - Load the embedding model once, with a warm-up query.
+  - Build the model client and read the git sha (`GIT_SHA`, or `git rev-parse`).
+
+  At shutdown, close what it built. `make dev` runs it under uvicorn on :8000 with reload.
+- `GET /api/health`: `status`, `database` (a `SELECT 1`), `git_sha`, `model`,
+  `prompt_version`. 200 when the database answers, 503 and "degraded" when not.
+- `POST /api/chat` takes `{question, strategy?, k?}` and answers as Server-Sent Events:
+  `sources` (each passage's number, title, heading path, file, location, text, score,
+  provenance), `delta`s, then `done` (`no_context`, model, `finish_reason`,
+  `prompt_version`, `cited`, `invalid_citations`, `retrieval_ms`, `first_text_ms`,
+  `total_ms`), or `error` in place of `done`. The events are the ask pipeline's, one for
+  one.
+- Errors: once streaming has begun the status is already 200, so every failure is one
+  `error` event with a code and a fixed sentence for the visitor. The codes are
+  `model_unavailable`, `model_error`, `database_unavailable`, `timeout`, and `internal`.
+  Details go to the log only. Bad input is a 422 with `{"error": {"code":
+  "invalid_request", "message": ...}}`; any unhandled exception is a shaped 500.
+- `CHAT_DEADLINE_SECONDS` (60) covers retrieval through the last word, so a hung model
+  ends in a `timeout` event, not a spinner.
+- Rate limit: `api/rate_limit.py`, per visitor IP, `RATE_LIMIT_PER_MINUTE` (10) and
+  `RATE_LIMIT_PER_DAY` (100), in memory, checked before the stream opens, so a refusal
+  is a plain 429 with `Retry-After`. It forgets everything on restart and is per process.
+- `MAX_QUESTION_CHARS` (500) in the request schema. `CORS_ORIGINS` defaults to
+  `["http://localhost:3000"]`; no wildcard.
+- `build_embedder(settings)` moved from the CLI to `ingest/embedder.py`, so the CLI and
+  the API build the embedder the same way.
+- Verified over real HTTP against Postgres and `qwen3.5:9b`:
+  - `curl localhost:8000/api/health` returned 200 with the commit and model.
+  - "What did Tae build at FollowThru?" streamed sources, a cited third-person answer,
+    and `done`.
+- FastAPI, uvicorn added as runtime dependencies; httpx as a dev one (the API tests).
+- 352 tests, 4 skipped. `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -421,6 +460,9 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D56 | `MODEL_REASONING_EFFORT` is sent only when set; local development sets `none`, production leaves it unset | Qwen's hidden reasoning cost about 30s and 300 tokens per answer and was running when Ollama crashed; a hosted Llama does not reason and may reject the field |
 | D57 | The no-context path is a floor on the best dense similarity (0.52), set just under the lowest real question rather than between real and off-topic | The two overlap: technical off-topic questions score up to 0.615, real ones as low as 0.542. Refusing a recruiter's real question is the worse mistake, and the prompt's own refusal rule catches off-topic questions that pass |
 | D58 | `pb ask` and the API use `DEFAULT_STRATEGY`, dense | Measured best after the name rewrite (MRR 0.722 against hybrid 0.687, equal recall); hybrid stays available by name |
+| D59 | The API is an app factory run by uvicorn with `--factory` | Importing the module then reads no settings and opens no connections, so tests build their own app with fakes and nothing global leaks between them |
+| D60 | After a chat stream opens, every failure is an `error` event with a fixed visitor-safe message | The HTTP status is already 200 once the first byte is sent; the browser needs a structured ending either way, and internals (hosts, URLs, traces) stay in the log |
+| D61 | Rate limiting is in process memory, by client IP, checked before streaming | One machine, one worker is the whole site (7.3). A second instance needs a shared store, and behind a proxy the IP must come from the proxy's header (see Open items) |
 
 ## Open items
 
@@ -446,6 +488,8 @@ things noticed while doing something else that would otherwise be lost.
 | "You" questions are not rewritten and score lowest in dense (MRR 0.528, 6 questions). Under D51 a visitor's "you" usually means Tae, but sometimes the bot ("can you help me"), so rewriting it is not obviously safe | 3.x, with more "you" questions first |
 | The rewrite makes every name question identical to its pronoun twin for dense, so the 34 pairs can no longer catch a name form the rewrite misses. Unit tests in `test_query_rewrite.py` carry that now | Add a pair whenever a new name form shows up in real traffic |
 | The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
+| The rate limit keys on `request.client.host`. Behind Fly's proxy every request would share the proxy's address, so the deploy must read the client IP from the proxy's header (Fly sends `Fly-Client-IP`) | 7.3 |
+| `CHAT_DEADLINE_SECONDS` is 60 for a laptop that reloads the model after idle. A hosted model answers in a few seconds; 20 to 30 is the production value | 7.3 |
 
 ## Findings
 

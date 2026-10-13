@@ -107,6 +107,23 @@ class Settings(BaseSettings):
     # this means a runaway answer, which shows as finish "length".
     answer_max_tokens: int = 500
 
+    # HTTP API. Origins the browser may call the API from. Never "*": the production list
+    # names the real site and nothing else.
+    cors_origins: tuple[str, ...] = ("http://localhost:3000",)
+    # Per visitor, by IP address, in this process's memory, so a restart forgets them.
+    # The day cap is the cost ceiling: each answer costs money on a hosted model.
+    rate_limit_per_minute: int = 10
+    rate_limit_per_day: int = 100
+    # Longest question accepted, in characters. A visitor's question is a sentence or two;
+    # the cap keeps a pasted essay from filling the model's window.
+    max_question_chars: int = 500
+    # The whole answer, retrieval through the last word, must finish within this. A model
+    # that hangs gets an error event instead of a visitor watching a spinner. Generous for
+    # a laptop, where the first request after idle reloads the model.
+    chat_deadline_seconds: float = 60.0
+    # Reported by /api/health. A deploy sets it; locally it is read from git at startup.
+    git_sha: str | None = None
+
     # Generation. These three are what make the model layer provider-agnostic: Ollama,
     # Together, Groq, and Fireworks all speak the same shape, so switching is config.
     model_name: str = "qwen3.5:9b"
