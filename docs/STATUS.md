@@ -516,6 +516,13 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - 353 backend tests, 4 skipped; 48 frontend tests. `make lint` clean. `next build`
   passes with `/` static.
 
+**README (8.5).**
+
+- `README.md` rewritten for someone opening the repository cold: what the project is, how
+  a question is answered (a step diagram), the measured retrieval and answer results with
+  what they changed, the decisions worth knowing, how to run it locally, and the layout.
+  Every number in it is from Findings. It says plainly that nothing is deployed yet.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
