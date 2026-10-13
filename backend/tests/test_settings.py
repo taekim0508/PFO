@@ -87,6 +87,7 @@ def test_log_format_rejects_anything_but_console_or_json(monkeypatch):
         ("chunk_overlap", 150),
         ("top_k", 5),
         ("rrf_k", 60),
+        ("subject_names", ("Tae Kim", "Tae")),
         ("embedding_model_name", "BAAI/bge-small-en-v1.5"),
         ("embedding_model_revision", "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"),
         ("model_name", "qwen3.5:9b"),
@@ -109,3 +110,15 @@ def test_settings_are_read_once_and_later_changes_are_ignored(monkeypatch):
 
     assert first.top_k == 7
     assert second.top_k == 7
+
+
+def test_subject_names_are_read_from_the_environment_as_a_json_list(monkeypatch):
+    monkeypatch.setenv("SUBJECT_NAMES", '["Tae Kim", "Tae", "TK"]')
+
+    assert Settings(_env_file=None).subject_names == ("Tae Kim", "Tae", "TK")
+
+
+def test_an_empty_list_turns_the_name_rewrite_off(monkeypatch):
+    monkeypatch.setenv("SUBJECT_NAMES", "[]")
+
+    assert Settings(_env_file=None).subject_names == ()

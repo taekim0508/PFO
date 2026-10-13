@@ -36,3 +36,12 @@ def test_hybrid_fuses_dense_and_lexical():
     strategy = build_strategy("hybrid", None, FakeEmbedder(), get_settings())
 
     assert [type(s) for s in strategy._strategies] == [DenseRetriever, LexicalRetriever]
+
+
+def test_dense_gets_the_subject_names_from_settings_alone_and_inside_hybrid():
+    settings = get_settings()
+    dense = build_strategy("dense", None, FakeEmbedder(), settings)
+    hybrid = build_strategy("hybrid", None, FakeEmbedder(), settings)
+
+    assert dense._subject_names == settings.subject_names
+    assert hybrid._strategies[0]._subject_names == settings.subject_names

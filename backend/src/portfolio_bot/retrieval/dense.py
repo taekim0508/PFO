@@ -13,6 +13,7 @@ the same either way.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import psycopg
@@ -21,6 +22,7 @@ from portfolio_bot.db.vector import vector_literal
 from portfolio_bot.ingest.embedder import Embedder
 from portfolio_bot.logging_config import get_logger
 from portfolio_bot.retrieval.base import Provenance, RetrievedChunk, ScoredChunk
+from portfolio_bot.retrieval.query import neutralize_subject
 
 logger = get_logger(__name__)
 
@@ -37,19 +39,31 @@ class DenseRetriever:
     place text in unrelated coordinate systems, so comparing a question from one against a
     chunk from another yields a number with no meaning. If any are present, the search
     leaves them out and logs a warning naming them.
+
+    Any of `subject_names` in the question becomes a pronoun before it is embedded; see
+    `retrieval/query.py` for why. Only the embedded text changes.
     """
 
     name = "dense"
 
-    def __init__(self, conn: Connection, embedder: Embedder, *, ef_search: int) -> None:
+    def __init__(
+        self,
+        conn: Connection,
+        embedder: Embedder,
+        *,
+        ef_search: int,
+        subject_names: Sequence[str] = (),
+    ) -> None:
         self._conn = conn
         self._embedder = embedder
         self._ef_search = ef_search
+        self._subject_names = tuple(subject_names)
 
     def retrieve(self, query: str, k: int) -> list[ScoredChunk]:
         if k < 1:
             raise ValueError(f"k must be at least 1, got {k}")
-        vector = vector_literal(self._embedder.embed_query(query))
+        question = neutralize_subject(query, self._subject_names)
+        vector = vector_literal(self._embedder.embed_query(question))
         model = {"name": self._embedder.model_name, "revision": self._embedder.model_revision}
 
         with self._conn.transaction():

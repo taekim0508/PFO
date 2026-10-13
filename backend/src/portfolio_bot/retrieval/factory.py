@@ -25,7 +25,12 @@ def build_strategy(
     its model on first use, so passing one to a strategy that never embeds costs nothing.
     """
     if name == "dense":
-        return DenseRetriever(conn, embedder, ef_search=settings.hnsw_ef_search)
+        return DenseRetriever(
+            conn,
+            embedder,
+            ef_search=settings.hnsw_ef_search,
+            subject_names=settings.subject_names,
+        )
     if name == "lexical":
         return LexicalRetriever(conn)
     if name == "hybrid":
