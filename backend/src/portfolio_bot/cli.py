@@ -21,6 +21,7 @@ from portfolio_bot.db.migrate import MigrationError, run_migrations
 from portfolio_bot.db.pool import close_pool, connection
 from portfolio_bot.evaluation.questions import EvalQuestion, EvalSetError, load_questions
 from portfolio_bot.evaluation.runner import EvalReport, check_sections, evaluate, known_sections
+from portfolio_bot.generation.ask import AnswerDone, Sources, ask
 from portfolio_bot.generation.client import (
     Message,
     ModelClient,
@@ -41,13 +42,8 @@ from portfolio_bot.settings import Settings, get_settings
 # How much of a chunk's first line `pb search` shows, in characters.
 SNIPPET_WIDTH = 100
 
-# Subcommand name -> (description, roadmap item that implements it).
 # Short, so a ping measures the round trip rather than how long the model can write for.
 PING_PROMPT = "Reply with one word: ready."
-
-PLANNED_COMMANDS: dict[str, tuple[str, str]] = {
-    "ask": ("Answer a question from retrieved context", "4.5"),
-}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,6 +93,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="How many chunks to return (default: TOP_K)",
     )
 
+    ask_parser = subparsers.add_parser(
+        "ask", help="Answer a question from the corpus, citing what it used"
+    )
+    ask_parser.add_argument("question", help="The question to answer")
+    ask_parser.add_argument(
+        "--strategy",
+        choices=STRATEGY_NAMES,
+        default=None,
+        help="How to retrieve passages (default: DEFAULT_STRATEGY)",
+    )
+    ask_parser.add_argument(
+        "--k", type=_positive_int, default=None, help="Passages to retrieve (default: TOP_K)"
+    )
+    ask_parser.add_argument(
+        "--stream", action="store_true", help="Print the answer as it is written"
+    )
+
     eval_parser = subparsers.add_parser(
         "eval", help="Measure retrieval quality against the evaluation set"
     )
@@ -128,9 +141,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the reply as it is written, and how long the first words took",
     )
-
-    for name, (description, item) in PLANNED_COMMANDS.items():
-        subparsers.add_parser(name, help=f"{description} (roadmap {item})")
 
     return parser
 
@@ -467,6 +477,108 @@ async def _ping(
     return 0
 
 
+def command_ask(
+    settings: Settings,
+    args: argparse.Namespace,
+    embedder: Embedder | None = None,
+    client: ModelClient | None = None,
+) -> int:
+    """Answer a question, then list the passages it cited and how long it took.
+
+    `embedder` and `client` are for tests, which pass fakes. Returns 2 for a blank
+    question, and 1 when the database or the model cannot be reached.
+    """
+    question: str = args.question.strip()
+    if not question:
+        print("The question is empty.", file=sys.stderr)
+        return 2
+    try:
+        return asyncio.run(_ask(settings, args, question, embedder, client))
+    except psycopg.OperationalError as error:
+        print("Cannot reach the database. Is it running? Try 'make db-up'.", file=sys.stderr)
+        print(f"  {error}", file=sys.stderr)
+        return 1
+    finally:
+        close_pool()
+
+
+async def _ask(
+    settings: Settings,
+    args: argparse.Namespace,
+    question: str,
+    embedder: Embedder | None,
+    client: ModelClient | None,
+) -> int:
+    built = None
+    if client is None:
+        built = client = build_model_client(settings)
+    if embedder is None:
+        embedder = _build_embedder(settings)
+    strategy_name = args.strategy or settings.default_strategy
+    k: int = args.k if args.k is not None else settings.top_k
+
+    sources: Sources | None = None
+    pieces: list[str] = []
+    done: AnswerDone | None = None
+    try:
+        with connection() as conn:
+            strategy = build_strategy(strategy_name, conn, embedder, settings)
+            async for event in ask(
+                question,
+                strategy=strategy,
+                client=client,
+                k=k,
+                token_budget=settings.context_token_budget,
+                relevance_floor=settings.relevance_floor,
+                temperature=settings.answer_temperature,
+                max_tokens=settings.answer_max_tokens,
+            ):
+                if isinstance(event, Sources):
+                    sources = event
+                elif isinstance(event, TextDelta):
+                    pieces.append(event.text)
+                    if args.stream:
+                        print(event.text, end="", flush=True)
+                else:
+                    done = event
+    except ModelError as error:
+        if args.stream and pieces:
+            print()
+        return _report_model_error(settings, error)
+    finally:
+        if built is not None:
+            await built.aclose()
+
+    if args.stream:
+        print()
+    else:
+        print("".join(pieces).strip())
+    assert sources is not None and done is not None  # the pipeline always sends both
+    _print_answer_sources(sources, done)
+    return 0
+
+
+def _print_answer_sources(sources: Sources, done: AnswerDone) -> None:
+    """The cited passages first, then the rest that were retrieved, then timings."""
+    print()
+    if done.no_context:
+        print("No passage was close enough to answer from, so the model was not asked.")
+    else:
+        print(f"Sources ({sources.strategy}):")
+        for passage in sources.passages:
+            mark = "cited" if passage.label in done.cited else "     "
+            print(f"  [{passage.label}] {mark}  {passage.location}")
+        if done.invalid_citations:
+            missing = ", ".join(f"[{n}]" for n in done.invalid_citations)
+            print(f"  Cited but never given: {missing}")
+    first = f"{done.first_text_seconds:.2f}s" if done.first_text_seconds is not None else "none"
+    print(
+        f"retrieval {done.retrieval_seconds:.2f}s, first words {first}, "
+        f"total {done.total_seconds:.2f}s, finish {done.finish_reason}, "
+        f"prompt {done.prompt_version}"
+    )
+
+
 def _report_model_error(settings: Settings, error: ModelError) -> int:
     """Explain a failed model call on stderr, naming what to check. Returns 1."""
     if isinstance(error, ModelRequestError):
@@ -524,12 +636,12 @@ def main(argv: list[str] | None = None) -> int:
             return command_eval(settings, args)
         if args.command == "model":
             return command_model(settings, args)
+        if args.command == "ask":
+            return command_ask(settings, args)
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)
         return 130
 
-    description, item = PLANNED_COMMANDS[args.command]
-    print(f"pb {args.command}: not implemented yet.")
-    print(f"  {description}")
-    print(f"  Lands in roadmap item {item}.")
-    return 0
+    # argparse refuses names it does not know, so this means a parser entry with no branch.
+    print(f"pb {args.command}: no handler for this command.", file=sys.stderr)
+    return 2

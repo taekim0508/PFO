@@ -68,7 +68,9 @@ def pytest_collection_modifyitems(config, items):
             continue
         skip = pytest.mark.skip(reason=reason)
         for item in items:
-            if marker in item.keywords:
+            # The marker itself, not `item.keywords`: keywords also hold test names and
+            # parameter ids, so a test parametrized with "model" would be skipped too.
+            if item.get_closest_marker(marker) is not None:
                 item.add_marker(skip)
 
 

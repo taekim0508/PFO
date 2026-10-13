@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from portfolio_bot.cli import PLANNED_COMMANDS, build_parser, command_eval, main
+from portfolio_bot.cli import build_parser, command_eval, main
 from portfolio_bot.db.migrate import run_migrations
 from portfolio_bot.evaluation.questions import EvalQuestion, EvalSetError, Section
 from portfolio_bot.evaluation.runner import check_sections, evaluate
@@ -33,10 +33,6 @@ questions:
   - question: What about zebras?
     expected: education.md > Courses
 """
-
-
-def test_eval_is_implemented_not_planned():
-    assert "eval" not in PLANNED_COMMANDS
 
 
 def test_run_requires_a_strategy():

@@ -1,8 +1,8 @@
-"""The `pb` entry point dispatches and reports its own incompleteness."""
+"""The `pb` entry point dispatches to every command."""
 
 import pytest
 
-from portfolio_bot.cli import PLANNED_COMMANDS, build_parser, command_ingest, main
+from portfolio_bot.cli import build_parser, command_ingest, main
 from portfolio_bot.db.migrate import run_migrations
 from portfolio_bot.ingest.embedder import FakeEmbedder
 from portfolio_bot.settings import get_settings
@@ -11,12 +11,6 @@ from portfolio_bot.settings import get_settings
 def test_no_arguments_prints_help_and_succeeds(capsys):
     assert main([]) == 0
     assert capsys.readouterr().out.strip()
-
-
-def test_migrate_is_implemented_not_planned():
-    # It moved out of PLANNED_COMMANDS when the runner landed. If it reappears there, the
-    # command is claiming to be unimplemented while doing real work.
-    assert "migrate" not in PLANNED_COMMANDS
 
 
 def test_migrate_is_offered_in_help(capsys):
@@ -33,13 +27,10 @@ def test_migrate_reports_an_unreachable_database(monkeypatch, capsys):
     assert "make db-up" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("command", sorted(PLANNED_COMMANDS))
-def test_planned_command_reports_not_implemented(command, capsys):
-    assert main([command]) == 0
-
-    out = capsys.readouterr().out
-    assert command in out
-    assert "not implemented" in out
+@pytest.mark.parametrize("command", ["migrate", "ingest", "search", "eval", "model", "ask"])
+def test_every_command_is_offered_in_help(command, capsys):
+    main([])
+    assert command in capsys.readouterr().out
 
 
 def test_unknown_command_returns_two():
@@ -52,10 +43,6 @@ def test_help_flag_succeeds():
 
 def test_version_flag_succeeds():
     assert main(["--version"]) == 0
-
-
-def test_ingest_is_implemented_not_planned():
-    assert "ingest" not in PLANNED_COMMANDS
 
 
 def test_ingest_reports_a_missing_corpus_directory(tmp_path, capsys):

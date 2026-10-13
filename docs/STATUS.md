@@ -316,6 +316,35 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - Tried by hand against `qwen3.5:9b` before committing; see Findings.
 - 302 tests, 4 skipped. `make lint` clean.
 
+**Generation (4.5, 4.6: ask pipeline and no-context path).**
+
+- `generation/ask.py`: `ask(question, *, strategy, client, k, token_budget,
+  relevance_floor, temperature, max_tokens)` is an async generator of events, in order:
+  - `Sources`, the numbered passages, sent before any text.
+  - `TextDelta`s, the answer as it streams.
+  - `AnswerDone`: `no_context`, model, `finish_reason`, `prompt_version`, `cited` and
+    `invalid_citations` (passage numbers the answer cites that exist, and ones that do
+    not), and timings (retrieval, first words, total).
+
+  Retrieval runs on a worker thread so the event loop stays free. The API (5.3) is meant
+  to forward these events as they are.
+- No-context path: when nothing is retrieved, or the best dense similarity is under
+  `RELEVANCE_FLOOR`, the model is never called and `NO_CONTEXT_ANSWER` goes out ("Tae
+  hasn't written about anything that matches that question...", with email and
+  LinkedIn). The floor applies to dense scores only; lexical and fused scores are on
+  other scales, so for them only an empty result takes this path.
+- Settings: `DEFAULT_STRATEGY` dense, `RELEVANCE_FLOOR` 0.52 (measured, see Findings),
+  `ANSWER_TEMPERATURE` 0.2, `ANSWER_MAX_TOKENS` 500.
+- `pb ask "question" [--strategy] [--k] [--stream]` prints the answer, then each
+  retrieved passage marked `cited` or not, any invented citation numbers, and timings.
+- With `ask` built, `pb` has no placeholder commands left, so the "not implemented yet"
+  mechanism (`PLANNED_COMMANDS`) and the tests that only checked commands had left it
+  were removed. Replaced by one test that every command is offered in `--help`.
+- Fixed in `tests/conftest.py`: the `--run-model` and `--run-llm` skips matched on
+  `item.keywords`, which include parameter ids, so any test parametrized with "model"
+  was silently skipped. They now check the marker itself.
+- 331 tests, 4 skipped (the real-model tests). `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -390,6 +419,8 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D54 | Retries and backoff are the SDK's, configured only by `MODEL_MAX_RETRIES`; our module translates what survives them into three error types | Tae's call. One retry policy instead of two stacked, and callers never depend on SDK exception classes. The base wait (0.5s) is the SDK's constant and not a setting |
 | D55 | The model client is async | 4.4 streams through an async generator and FastAPI (5.x) is async; converting sync callers later is the expensive direction. `pb` runs it with `asyncio.run` |
 | D56 | `MODEL_REASONING_EFFORT` is sent only when set; local development sets `none`, production leaves it unset | Qwen's hidden reasoning cost about 30s and 300 tokens per answer and was running when Ollama crashed; a hosted Llama does not reason and may reject the field |
+| D57 | The no-context path is a floor on the best dense similarity (0.52), set just under the lowest real question rather than between real and off-topic | The two overlap: technical off-topic questions score up to 0.615, real ones as low as 0.542. Refusing a recruiter's real question is the worse mistake, and the prompt's own refusal rule catches off-topic questions that pass |
+| D58 | `pb ask` and the API use `DEFAULT_STRATEGY`, dense | Measured best after the name rewrite (MRR 0.722 against hybrid 0.687, equal recall); hybrid stays available by name |
 
 ## Open items
 
@@ -601,4 +632,13 @@ platforms he has used, and cited them. The first draft said "in the provided pas
 the visitor; rule 6 was added and the rerun no longer did. Seven questions are a smoke
 test, not a measurement; the slipped-"I" rate across the eval set comes with `pb ask`.
 Answers took 4.5 to 20s, most of it generation on the laptop.
+
+**2026-10-13, no line separates real questions from off-topic ones by dense score.** Best
+dense similarity for each of the 106 evaluation questions: minimum 0.542, 5th percentile
+0.551, median 0.660. Lowest were the broad ones ("Tell me about him", "Does Tae have
+leadership experience?", "What experience does Tae have?"). For 15 off-topic questions:
+median 0.501, maximum 0.615 ("Explain quantum entanglement" 0.615, "How do I reverse a
+linked list in Python?" 0.609, "hi" 0.589, "What's the weather in Seattle today?" 0.569).
+Technical off-topic questions resemble a technical corpus. The floor was set at 0.52,
+under every real question, which stops about half the off-topic set before the model.
 

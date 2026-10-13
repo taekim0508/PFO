@@ -4,7 +4,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from portfolio_bot.cli import PLANNED_COMMANDS, build_parser, command_search, main
+from portfolio_bot.cli import build_parser, command_search, main
 from portfolio_bot.db.migrate import run_migrations
 from portfolio_bot.ingest.chunker import chunk_document
 from portfolio_bot.ingest.embedder import FakeEmbedder
@@ -18,12 +18,6 @@ DOCUMENT = "---\ntitle: Abroadly\n---\n\n## Search\n\nI built the search index.\
 def search(settings, argv, embedder=None):
     args = build_parser().parse_args(["search", *argv])
     return command_search(settings, args, embedder=embedder or FakeEmbedder())
-
-
-def test_search_is_implemented_not_planned(capsys):
-    assert "search" not in PLANNED_COMMANDS
-    main([])
-    assert "search" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("k", ["0", "-1", "two"])
