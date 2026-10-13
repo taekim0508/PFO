@@ -41,16 +41,35 @@ def pytest_addoption(parser):
         action="store_true",
         help="Run tests marked `model`, which download and run the real embedding model.",
     )
+    parser.addoption(
+        "--run-llm",
+        action="store_true",
+        help="Run tests marked `llm`, which call the real generation model at MODEL_BASE_URL.",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip `model` tests unless asked for, so the default suite never downloads a model."""
-    if config.getoption("--run-model"):
-        return
-    skip = pytest.mark.skip(reason="needs the real embedding model; run with --run-model")
-    for item in items:
-        if "model" in item.keywords:
-            item.add_marker(skip)
+    """Skip `model` and `llm` tests unless asked for.
+
+    The default suite and CI never download a model or call a model endpoint.
+    """
+    skips = {
+        "model": (
+            config.getoption("--run-model"),
+            "needs the real embedding model; run with --run-model",
+        ),
+        "llm": (
+            config.getoption("--run-llm"),
+            "needs a running generation model; run with --run-llm",
+        ),
+    }
+    for marker, (enabled, reason) in skips.items():
+        if enabled:
+            continue
+        skip = pytest.mark.skip(reason=reason)
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

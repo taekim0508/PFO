@@ -246,6 +246,35 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - 238 tests, 2 skipped (`--run-model`). `make lint` clean. The new dense test was verified
   red by embedding the original question instead of the rewritten one.
 
+**Generation (4.3, 4.3a).**
+
+- `generation/client.py` has the `ModelClient` protocol (async `complete(messages, *,
+  temperature, max_tokens) -> Completion`), `Message`, `Completion` (text, the model the
+  server says answered, `finish_reason`, token counts when reported), and
+  `OpenAICompatibleClient`, the one implementation, built on the `openai` SDK pointed at
+  `MODEL_BASE_URL`. `build_model_client(settings)` is the one place settings become a
+  client. `FakeModelClient` replies from a script and records calls, for later units.
+- Retries are the SDK's: 408, 409, 429, 5xx, dropped connections, and timeouts, waiting
+  0.5s and doubling to 8s with jitter, or as long as `Retry-After` asks. What is left when
+  they run out becomes `ModelUnavailableError`; any other 4xx is `ModelRequestError` with
+  its status, never retried; a 200 with no readable text is `ModelError`. Callers never
+  import the SDK.
+- `MODEL_TIMEOUT_SECONDS` (120, per attempt) and `MODEL_MAX_RETRIES` (3) in settings and
+  `.env.example`.
+- `pb model ping [--prompt TEXT]` sends one prompt and prints the reply, the model that
+  answered, `finish_reason`, tokens, and latency, or why there was no answer.
+- `make model-up` checks Ollama is installed and running, pulls `MODEL_NAME` (read from
+  settings), then runs `pb model ping`.
+- Tests fake the endpoint at the HTTP transport and replace the SDK's sleep, so retries
+  are counted and their waits recorded without waiting. One live test, marked `llm`, runs
+  only with `pytest --run-llm`.
+- `openai>=3.29` added as a runtime dependency; it brings `httpx2`, which the fake
+  transport is written against.
+- Verified against local Ollama: `make model-up` pulls `qwen3.5:9b` and its ping answers
+  "ready" with `finish_reason` stop. `pytest --run-llm` passes. Reasoning output lands in a
+  separate field, so `content` arrives clean with no stripping (see Findings).
+- 279 tests, 3 skipped (`--run-model` twice, `--run-llm` once). `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -316,6 +345,9 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D50 | precision@k divides by k, not by how many results came back | A strategy returning two chunks for k=5 should not get perfect precision for getting both right |
 | D51 | The bot speaks as a close friend answering on Tae's behalf, in the third person, not as Tae | Tae's call. Eval questions are mostly third person ("Tae", "he"), with a few "you" twins for visitors who address the bot as Tae anyway |
 | D52 | The subject's name is rewritten to a pronoun before dense retrieval embeds a question; the corpus, titles, and lexical query are untouched | Measured best of six candidates (see Findings 2026-10-12). Rewriting the corpus to "Tae" fixed dense but broke lexical, which cannot discount a word in every chunk |
+| D53 | The model client is the `openai` Python SDK pointed at `MODEL_BASE_URL`, not hand-written HTTP | Tae's call: less code, typed responses, and streaming parsed for 4.4. It sends only the chat-completions shape every provider here accepts, and no request goes to OpenAI |
+| D54 | Retries and backoff are the SDK's, configured only by `MODEL_MAX_RETRIES`; our module translates what survives them into three error types | Tae's call. One retry policy instead of two stacked, and callers never depend on SDK exception classes. The base wait (0.5s) is the SDK's constant and not a setting |
+| D55 | The model client is async | 4.4 streams through an async generator and FastAPI (5.x) is async; converting sync callers later is the expensive direction. `pb` runs it with `asyncio.run` |
 
 ## Open items
 
@@ -341,6 +373,8 @@ things noticed while doing something else that would otherwise be lost.
 | "You" questions are not rewritten and score lowest in dense (MRR 0.528, 6 questions). Under D51 a visitor's "you" usually means Tae, but sometimes the bot ("can you help me"), so rewriting it is not obviously safe | 3.x, with more "you" questions first |
 | The rewrite makes every name question identical to its pronoun twin for dense, so the 34 pairs can no longer catch a name form the rewrite misses. Unit tests in `test_query_rewrite.py` carry that now | Add a pair whenever a new name form shows up in real traffic |
 | The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
+| `qwen3.5:9b` reasons before every answer: about 300 hidden tokens and 30s for a one-word reply. `reasoning_effort: "none"` turns it off (1 token, 1.1s), and is a standard chat-completions field, but a hosted Llama endpoint may reject or ignore it. Not sent by anything yet | Tae's decision; likely a `MODEL_REASONING_EFFORT` setting sent only when set, in 4.2 or 4.5 |
+| Every model call logs an `httpx2: HTTP Request: POST ...` INFO line, the SDK's HTTP library speaking through the root logger | Cosmetic; 8.x, alongside the other noisy log lines |
 
 ## Findings
 
@@ -502,4 +536,18 @@ lexical unchanged at 0.621 / 0.522 / 0.181; hybrid 0.817 / 0.687 / 0.251. Dense 
 hybrid on MRR at equal recall, which reverses the earlier ranking: hybrid's lead came
 from covering for the name. Fusing with lexical, which ranks below both, now costs more
 than it rescues. Not acted on here; it is a decision for whoever picks the API's default.
+
+**2026-10-12, the local model reasons before answering, and the Mac is short of memory
+for it.** Through `pb model ping`, `qwen3.5:9b` on Ollama answered "Reply with one word:
+ready." with "ready" in 30s, spending 276 output tokens. The raw response shows why: the
+message has a separate `reasoning` field holding a step-by-step "Thinking Process", and
+`content` holds only the answer. So the client needs no stripping on Ollama, but every
+answer pays for reasoning nobody sees. The same request with `"reasoning_effort": "none"`
+returned "ready" with 1 output token in 1.1s. `"think": false`, Ollama's own name for the
+switch, returned nothing readable on the OpenAI-compatible endpoint.
+
+Separately, two requests stalled for minutes. During them, swap was 11.9 of 13.3 GB used,
+free memory was 16%, and `ollama ps` showed the model "Stopping..." and reloading. The
+model takes 7.6 to 8.1 GB on a 16 GB M2 Pro. Latency measured on this machine depends on
+what else is open, so treat local timings as rough until other apps are closed.
 

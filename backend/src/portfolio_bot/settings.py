@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # No default, so deploying without a key fails at startup rather than at the first
     # user request. Ollama ignores the value it is sent, so any placeholder works locally.
     model_api_key: str
+    # Seconds one attempt may take before it counts as failed. Generous because the first
+    # request after Ollama starts loads the whole model into memory, several gigabytes.
+    model_timeout_seconds: float = 120.0
+    # Attempts after the first when the endpoint rate-limits, errors, or drops the
+    # connection. The waits between them (0.5s, doubling, at most 8s) are the SDK's.
+    model_max_retries: int = 3
 
     # Logging.
     log_level: str = "INFO"

@@ -8,7 +8,9 @@ exists.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
+import time
 from pathlib import Path
 
 import psycopg
@@ -19,6 +21,14 @@ from portfolio_bot.db.migrate import MigrationError, run_migrations
 from portfolio_bot.db.pool import close_pool, connection
 from portfolio_bot.evaluation.questions import EvalQuestion, EvalSetError, load_questions
 from portfolio_bot.evaluation.runner import EvalReport, check_sections, evaluate, known_sections
+from portfolio_bot.generation.client import (
+    Message,
+    ModelClient,
+    ModelError,
+    ModelRequestError,
+    ModelUnavailableError,
+    build_model_client,
+)
 from portfolio_bot.ingest.embedder import Embedder, SentenceTransformerEmbedder
 from portfolio_bot.ingest.pipeline import IngestReport, ingest
 from portfolio_bot.logging_config import configure_logging, get_logger
@@ -30,6 +40,9 @@ from portfolio_bot.settings import Settings, get_settings
 SNIPPET_WIDTH = 100
 
 # Subcommand name -> (description, roadmap item that implements it).
+# Short, so a ping measures the round trip rather than how long the model can write for.
+PING_PROMPT = "Reply with one word: ready."
+
 PLANNED_COMMANDS: dict[str, tuple[str, str]] = {
     "ask": ("Answer a question from retrieved context", "4.5"),
 }
@@ -98,6 +111,15 @@ def build_parser() -> argparse.ArgumentParser:
         )
     eval_commands.add_parser(
         "sections", help="List every section, in the form the evaluation set expects"
+    )
+
+    model_parser = subparsers.add_parser("model", help="Check the generation model")
+    model_commands = model_parser.add_subparsers(dest="model_command", metavar="model_command")
+    ping_parser = model_commands.add_parser(
+        "ping", help="Send one short prompt and print the reply, the model, and the latency"
+    )
+    ping_parser.add_argument(
+        "--prompt", default=PING_PROMPT, help=f'What to send (default: "{PING_PROMPT}")'
     )
 
     for name, (description, item) in PLANNED_COMMANDS.items():
@@ -362,6 +384,59 @@ def _print_eval_compare(reports: list[EvalReport]) -> None:
         )
 
 
+def command_model(
+    settings: Settings, args: argparse.Namespace, client: ModelClient | None = None
+) -> int:
+    """Run a `pb model` subcommand. `ping` is the only one.
+
+    `client` is for tests, which pass a fake so nothing calls a real endpoint. Returns 1
+    when the endpoint refuses the request or cannot be reached.
+    """
+    if args.model_command != "ping":
+        print("Usage: pb model ping [--prompt TEXT]", file=sys.stderr)
+        return 2
+    return asyncio.run(_ping(settings, args.prompt, client))
+
+
+async def _ping(settings: Settings, prompt: str, client: ModelClient | None) -> int:
+    # Only a client built here is closed here; one passed in belongs to the caller.
+    built = None
+    if client is None:
+        built = client = build_model_client(settings)
+    print(f"{client.model_name} at {settings.model_base_url}")
+    started = time.perf_counter()
+    try:
+        completion = await client.complete([Message(role="user", content=prompt)])
+    except ModelRequestError as error:
+        print(f"The endpoint refused the request: {error}", file=sys.stderr)
+        print("  Check MODEL_NAME and MODEL_API_KEY in .env.", file=sys.stderr)
+        return 1
+    except ModelUnavailableError as error:
+        print(f"Cannot get an answer from {settings.model_base_url}.", file=sys.stderr)
+        print(f"  {error}", file=sys.stderr)
+        print("  If this is Ollama, is it running? Try 'make model-up'.", file=sys.stderr)
+        return 1
+    except ModelError as error:
+        print(f"The endpoint answered, but not in a readable form: {error}", file=sys.stderr)
+        return 1
+    finally:
+        if built is not None:
+            await built.aclose()
+    elapsed = time.perf_counter() - started
+
+    tokens = (
+        f"{completion.prompt_tokens} in, {completion.completion_tokens} out"
+        if completion.prompt_tokens is not None and completion.completion_tokens is not None
+        else "not reported"
+    )
+    print(f"  reply:        {' '.join(completion.text.split())}")
+    print(f"  answered by:  {completion.model}")
+    print(f"  finish:       {completion.finish_reason}")
+    print(f"  tokens:       {tokens}")
+    print(f"  latency:      {elapsed:.2f}s")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code.
 
@@ -400,6 +475,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_search(settings, args)
     if args.command == "eval":
         return command_eval(settings, args)
+    if args.command == "model":
+        return command_model(settings, args)
 
     description, item = PLANNED_COMMANDS[args.command]
     print(f"pb {args.command}: not implemented yet.")
