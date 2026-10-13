@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
+    from portfolio_bot.settings import Settings
+
 # Properties of bge-small-en-v1.5, not settings. The width is also written into the schema
 # as vector(384), so changing models to one with a different width is a migration.
 EMBEDDING_DIMENSION = 384
@@ -159,3 +161,13 @@ def _hash_vector(text: str) -> list[float]:
     values = [value / 2**31 - 1.0 for value in integers]
     length = math.sqrt(sum(value * value for value in values))
     return [value / length for value in values]
+
+
+def build_embedder(settings: Settings) -> SentenceTransformerEmbedder:
+    """The real embedder the settings describe. Its model loads on first use, not here."""
+    return SentenceTransformerEmbedder(
+        settings.embedding_model_name,
+        settings.embedding_model_revision,
+        settings.embedding_batch_size,
+        query_instruction=settings.embedding_query_instruction,
+    )

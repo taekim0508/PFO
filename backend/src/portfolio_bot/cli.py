@@ -32,7 +32,7 @@ from portfolio_bot.generation.client import (
     TextDelta,
     build_model_client,
 )
-from portfolio_bot.ingest.embedder import Embedder, SentenceTransformerEmbedder
+from portfolio_bot.ingest.embedder import Embedder, build_embedder
 from portfolio_bot.ingest.pipeline import IngestReport, ingest
 from portfolio_bot.logging_config import configure_logging, get_logger
 from portfolio_bot.retrieval.base import RetrievalStrategy, ScoredChunk
@@ -152,15 +152,6 @@ def _positive_int(value: str) -> int:
     return number
 
 
-def _build_embedder(settings: Settings) -> SentenceTransformerEmbedder:
-    return SentenceTransformerEmbedder(
-        settings.embedding_model_name,
-        settings.embedding_model_revision,
-        settings.embedding_batch_size,
-        query_instruction=settings.embedding_query_instruction,
-    )
-
-
 def command_migrate(settings: Settings) -> int:
     """Apply pending migrations, reporting what was applied.
 
@@ -204,7 +195,7 @@ def command_ingest(
         return 1
 
     if embedder is None:
-        embedder = _build_embedder(settings)
+        embedder = build_embedder(settings)
 
     try:
         with connection() as conn:
@@ -264,7 +255,7 @@ def command_search(
         return 2
     k: int = args.k if args.k is not None else settings.top_k
     if embedder is None:
-        embedder = _build_embedder(settings)
+        embedder = build_embedder(settings)
 
     try:
         with connection() as conn:
@@ -341,7 +332,7 @@ def command_eval(
             print(f"No questions yet. Add some to {path}.", file=sys.stderr)
             return 1
     if embedder is None:
-        embedder = _build_embedder(settings)
+        embedder = build_embedder(settings)
 
     try:
         with connection() as conn:
@@ -513,7 +504,7 @@ async def _ask(
     if client is None:
         built = client = build_model_client(settings)
     if embedder is None:
-        embedder = _build_embedder(settings)
+        embedder = build_embedder(settings)
     strategy_name = args.strategy or settings.default_strategy
     k: int = args.k if args.k is not None else settings.top_k
 

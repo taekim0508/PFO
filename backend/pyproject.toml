@@ -18,6 +18,8 @@ dependencies = [
     # dependency on OpenAI the company. 3.x is the line built on httpx2, which the tests'
     # fake transport is written against.
     "openai>=3.29",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
 
 # On Linux (CI and the production container), torch comes from PyTorch's CPU-only index.
@@ -48,6 +50,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-pyyaml>=6.0",
+    "httpx>=0.27",
 ]
 
 [tool.ruff]

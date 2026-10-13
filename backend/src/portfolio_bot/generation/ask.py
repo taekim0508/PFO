@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 
 from portfolio_bot.generation.client import ModelClient, StreamDone, TextDelta
@@ -96,7 +96,7 @@ async def ask(
     relevance_floor: float,
     temperature: float | None = None,
     max_tokens: int | None = None,
-) -> AsyncIterator[AskEvent]:
+) -> AsyncGenerator[AskEvent, None]:
     """Answer `question` as a stream of events: `Sources`, `TextDelta`s, `AnswerDone`.
 
     Retrieval is blocking database and model work, so it runs on a worker thread and the
