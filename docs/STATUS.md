@@ -231,6 +231,21 @@ Retrieval 3.1 to 3.5 are built. 3.6, the evaluation harness, is what says which 
 
 Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 
+**Subject name rewrite (dense retrieval).**
+
+- `retrieval/query.py` has `neutralize_subject(query, names)`, a pure function: each form
+  of the name becomes "he", or "his" when possessive. Whole words only, case ignored,
+  longer forms first, so "Tae Kim's" becomes "his" and `taekim0508` is left alone.
+- `DenseRetriever` takes `subject_names` and embeds the rewritten question. Results, the
+  question lexical search sees, and anything downstream are unchanged.
+- `SUBJECT_NAMES` in settings, default `["Tae Kim", "Tae"]`, a JSON list in the
+  environment; `[]` turns it off. The factory passes it to dense, alone or inside hybrid.
+- No re-ingest, no migration, no corpus change. D35's title prefix stays.
+- Name questions now score exactly as their pronoun twins in every strategy. Dense now
+  leads the table (see Findings).
+- 238 tests, 2 skipped (`--run-model`). `make lint` clean. The new dense test was verified
+  red by embedding the original question instead of the rewritten one.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -300,6 +315,7 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D49 | Eval answers are sections, not chunks, and a section covers everything beneath it | Chunk ids change on every ingest, and chunk size is one of the things 3.6 exists to compare; a section survives both |
 | D50 | precision@k divides by k, not by how many results came back | A strategy returning two chunks for k=5 should not get perfect precision for getting both right |
 | D51 | The bot speaks as a close friend answering on Tae's behalf, in the third person, not as Tae | Tae's call. Eval questions are mostly third person ("Tae", "he"), with a few "you" twins for visitors who address the bot as Tae anyway |
+| D52 | The subject's name is rewritten to a pronoun before dense retrieval embeds a question; the corpus, titles, and lexical query are untouched | Measured best of six candidates (see Findings 2026-10-12). Rewriting the corpus to "Tae" fixed dense but broke lexical, which cannot discount a word in every chunk |
 
 ## Open items
 
@@ -321,7 +337,9 @@ things noticed while doing something else that would otherwise be lost.
 | The pool's "opened" and "closed" INFO lines print around every `pb search` result | Cosmetic; 8.x |
 | The other-model check reads every row of `chunk_embeddings` on every search. Free at 76 rows, not at a much larger corpus | Move to once per process or into ingest if the corpus grows |
 | Two chunks are a heading and nothing else (`Revisiting the project for this review`, `What I built: an explainable traffic signal controller`), produced when a heading is followed directly by subheadings. They are noise in every search | 2.3, the chunker |
-| A question naming Tae is pulled toward `about.md`, whose title "About Tae Kim" is embedded with every chunk. Measured on 2026-10-12 (see Findings). Candidate fixes, none built: drop the title from `about.md`'s embedded text, retitle the file, or remove the name from the question before embedding it. The 34 twin pairs are the test for any of them | Its own unit, touching 2.4 or 3.2 |
+| With the name handled, dense beats hybrid on MRR (0.722 against 0.687) at equal recall. Nothing picks a default strategy yet | 5.x, when the API chooses one |
+| "You" questions are not rewritten and score lowest in dense (MRR 0.528, 6 questions). Under D51 a visitor's "you" usually means Tae, but sometimes the bot ("can you help me"), so rewriting it is not obviously safe | 3.x, with more "you" questions first |
+| The rewrite makes every name question identical to its pronoun twin for dense, so the 34 pairs can no longer catch a name form the rewrite misses. Unit tests in `test_query_rewrite.py` carry that now | Add a pair whenever a new name form shows up in real traffic |
 | The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
 
 ## Findings
@@ -457,4 +475,31 @@ hybrid (MRR 0.758 against 0.716). So hybrid is the right default as things stand
 partly because it compensates for a defect in what dense embeds. If the name problem is
 fixed at the source, this comparison should be rerun before assuming hybrid still leads.
 Six "you" twins are too few to conclude anything; in dense they mostly ranked with "he".
+
+**2026-10-12, rewriting the name in the question fixes it, and dense now leads.** Six
+candidate fixes scored in memory on the 106-question set, then the chosen one built and
+rerun for real (the in-memory and real numbers match exactly). Dense MRR on name / pronoun
+/ other questions, then overall MRR for dense / lexical / hybrid:
+
+| candidate | dense by group | overall MRR |
+|---|---|---|
+| as shipped | 0.521 / 0.758 / 0.682 | 0.646 / 0.522 / 0.674 |
+| no title on `about.md` chunks | 0.674 / 0.758 / 0.682 | |
+| no titles on any chunk | 0.637 / 0.690 / 0.645 | |
+| `about.md` retitled "About me" | 0.659 / 0.741 / 0.682 | |
+| name dropped from the question | 0.743 / 0.758 / 0.682 | |
+| corpus rewritten to third person "Tae" | 0.745 / 0.748 / 0.714 | 0.734 / 0.416 / 0.589 |
+| corpus rewritten to third person "he" | 0.490 / 0.752 / 0.683 | 0.637 / 0.522 / 0.663 |
+| **name rewritten to "he" / "his" (built)** | **0.758 / 0.758 / 0.682** | **0.722 / 0.522 / 0.687** |
+
+Titles help: removing all of them hurt every group. A third-person corpus naming Tae fixed
+dense but sank lexical to 0.416, because `ts_rank_cd` cannot discount a word that is in
+every chunk; that is BM25's job (8.2). The corpus rows used a crude word swap and are
+directional only.
+
+After the fix, `pb eval compare`: dense recall@5 0.818, MRR 0.722, precision@5 0.262;
+lexical unchanged at 0.621 / 0.522 / 0.181; hybrid 0.817 / 0.687 / 0.251. Dense now beats
+hybrid on MRR at equal recall, which reverses the earlier ranking: hybrid's lead came
+from covering for the name. Fusing with lexical, which ranks below both, now costs more
+than it rescues. Not acted on here; it is a decision for whoever picks the API's default.
 

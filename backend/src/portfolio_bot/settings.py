@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # How many results hybrid asks each strategy for before fusing them. Deeper than top_k,
     # so a chunk one arm ranks 8th can still be lifted by the other.
     hybrid_candidate_depth: int = 20
+    # The forms of the subject's name that dense retrieval turns into "he" or "his" before
+    # embedding a question. The name appears in every question about him and in almost no
+    # stored text, so left in it pulls questions toward the one title that carries it.
+    subject_names: tuple[str, ...] = ("Tae Kim", "Tae")
 
     # Generation. These three are what make the model layer provider-agnostic: Ollama,
     # Together, Groq, and Fireworks all speak the same shape, so switching is config.

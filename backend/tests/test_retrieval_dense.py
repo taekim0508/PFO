@@ -169,3 +169,34 @@ def test_satisfies_the_retrieval_strategy_protocol(db):
 
     assert isinstance(strategy, RetrievalStrategy)
     assert strategy.name == "dense"
+
+
+class RecordingEmbedder(FixedQueryEmbedder):
+    """A FixedQueryEmbedder that remembers every question it was asked to embed."""
+
+    def __init__(self, vector):
+        super().__init__(vector)
+        self.questions = []
+
+    def embed_query(self, text):
+        self.questions.append(text)
+        return super().embed_query(text)
+
+
+def test_the_subject_name_is_replaced_before_the_question_is_embedded(corpus):
+    embedder = RecordingEmbedder(plane(1.0, 0.0))
+    dense = DenseRetriever(corpus, embedder, ef_search=40, subject_names=("Tae Kim", "Tae"))
+
+    results = dense.retrieve("Where did Tae go to school, and what was Tae Kim's GPA?", k=2)
+
+    assert embedder.questions == ["Where did he go to school, and what was his GPA?"]
+    # Only the embedded text changes; the search itself runs as before.
+    assert [r.chunk.title for r in results] == ["Exact", "Near"]
+
+
+def test_without_subject_names_the_question_is_embedded_as_asked(corpus):
+    embedder = RecordingEmbedder(plane(1.0, 0.0))
+
+    DenseRetriever(corpus, embedder, ef_search=40).retrieve("Where did Tae go?", k=1)
+
+    assert embedder.questions == ["Where did Tae go?"]
