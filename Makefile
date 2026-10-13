@@ -70,8 +70,23 @@ db-down:
 	docker compose down
 	@echo "==> Stopped. The data volume is kept. 'docker compose down -v' also erases it."
 
+# The model name comes from settings, so MODEL_NAME in .env is the one place it is set.
+# The Ollama app runs the server in the background; `ollama list` is the cheapest call
+# that fails when it is not running.
 model-up:
-	@echo "Nothing to do yet: the local model client lands in roadmap item 4.3a."
+	@if ! command -v ollama >/dev/null 2>&1; then \
+		echo "Ollama is not installed. Get it from https://ollama.com/download"; \
+		exit 1; \
+	fi
+	@if ! ollama list >/dev/null 2>&1; then \
+		echo "The Ollama server is not running. Open the Ollama app, or run 'ollama serve'."; \
+		exit 1; \
+	fi
+	@MODEL=$$(cd $(BACKEND) && $(UV) run python -c \
+		"from portfolio_bot.settings import get_settings; print(get_settings().model_name)") \
+		&& echo "==> Pulling $$MODEL" && ollama pull "$$MODEL"
+	@echo "==> Asking it something through the project's client"
+	cd $(BACKEND) && $(UV) run pb model ping
 
 migrate:
 	cd $(BACKEND) && $(UV) run pb migrate

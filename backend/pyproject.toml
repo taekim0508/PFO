@@ -14,6 +14,10 @@ dependencies = [
     # Listed directly only so the source below applies to it. sentence-transformers would
     # pull it in anyway.
     "torch>=2.2",
+    # The client for every OpenAI-compatible endpoint (Ollama, Together, Groq, ...), not a
+    # dependency on OpenAI the company. 3.x is the line built on httpx2, which the tests'
+    # fake transport is written against.
+    "openai>=3.29",
 ]
 
 # On Linux (CI and the production container), torch comes from PyTorch's CPU-only index.
@@ -61,6 +65,7 @@ addopts = "-q"
 markers = [
     "database: needs a running Postgres. Creates and drops a throwaway database.",
     "model: downloads and runs the real embedding model. Skipped unless --run-model.",
+    "llm: calls the real generation model at MODEL_BASE_URL. Skipped unless --run-llm.",
 ]
 
 [tool.mypy]
