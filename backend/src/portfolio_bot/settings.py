@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # Attempts after the first when the endpoint rate-limits, errors, or drops the
     # connection. The waits between them (0.5s, doubling, at most 8s) are the SDK's.
     model_max_retries: int = 3
+    # Sent with every request when set. "none" turns off the hidden reasoning some models
+    # (qwen3.5) write before answering, which on a laptop is most of the wait. Unset sends
+    # nothing, for endpoints that do not reason or do not accept the field.
+    model_reasoning_effort: str | None = None
 
     # Logging.
     log_level: str = "INFO"

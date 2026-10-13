@@ -27,6 +27,10 @@ class FailingClient:
     async def complete(self, messages, *, temperature=None, max_tokens=None):
         raise self._error
 
+    async def stream(self, messages, *, temperature=None, max_tokens=None):
+        raise self._error
+        yield  # makes this an async generator
+
 
 def test_prints_the_reply_the_model_and_the_latency(capsys):
     assert ping(FakeModelClient(["ready"], model="qwen3.5:9b")) == 0
@@ -95,3 +99,28 @@ def test_model_without_a_subcommand_prints_usage_and_exits_2(capsys):
     assert main(["model"]) == 2
 
     assert "pb model ping" in capsys.readouterr().err
+
+
+def test_stream_prints_the_reply_as_it_arrives_and_the_time_to_first_words(capsys):
+    assert ping(FakeModelClient(["ready\nand waiting"]), "--stream") == 0
+
+    out = capsys.readouterr().out
+    assert "reply:        ready and waiting\n" in out
+    assert "first words:" in out
+    assert "finish:       stop" in out
+
+
+def test_a_failed_stream_exits_1(capsys):
+    assert ping(FailingClient(ModelUnavailableError("broke")), "--stream") == 1
+
+    assert "Cannot get an answer" in capsys.readouterr().err
+
+
+def test_ctrl_c_prints_cancelled_and_exits_130(monkeypatch, capsys):
+    def interrupted(settings, args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("portfolio_bot.cli.command_model", interrupted)
+
+    assert main(["model", "ping"]) == 130
+    assert "Cancelled." in capsys.readouterr().err

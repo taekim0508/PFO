@@ -275,6 +275,24 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
   separate field, so `content` arrives clean with no stripping (see Findings).
 - 279 tests, 3 skipped (`--run-model` twice, `--run-llm` once). `make lint` clean.
 
+**Generation (4.4, streaming).**
+
+- `ModelClient.stream(messages, *, temperature, max_tokens)` yields `TextDelta` events
+  in order, then exactly one `StreamDone` (model, `finish_reason`, token counts when
+  reported). Retries cover opening the stream; a stream that breaks partway raises
+  `ModelUnavailableError` after whatever text already went out. Hidden reasoning arrives
+  in a separate field and never reaches the caller. `FakeModelClient.stream` splits its
+  scripted reply into word pieces that join back exactly.
+- `MODEL_REASONING_EFFORT`, sent with every request when set. The local `.env` sets it to
+  `none`; unset sends nothing.
+- `pb model ping --stream` prints the reply as it arrives, plus time to first words.
+  Ctrl-C in any `pb` command prints "Cancelled." and exits 130 instead of a traceback.
+- The `httpx2` per-request INFO line is silenced, since it landed mid-reply. The SDK's
+  "Retrying request" lines still show.
+- Live, with reasoning off: "In one sentence, what is a database index?" streamed 30
+  tokens, first words at 9.4s (most of it reloading the model after idle), done at 10.4s.
+- 291 tests, 4 skipped (`--run-model` twice, `--run-llm` twice). `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -348,6 +366,7 @@ history. A decision that gets reversed is edited here, with the reversal noted i
 | D53 | The model client is the `openai` Python SDK pointed at `MODEL_BASE_URL`, not hand-written HTTP | Tae's call: less code, typed responses, and streaming parsed for 4.4. It sends only the chat-completions shape every provider here accepts, and no request goes to OpenAI |
 | D54 | Retries and backoff are the SDK's, configured only by `MODEL_MAX_RETRIES`; our module translates what survives them into three error types | Tae's call. One retry policy instead of two stacked, and callers never depend on SDK exception classes. The base wait (0.5s) is the SDK's constant and not a setting |
 | D55 | The model client is async | 4.4 streams through an async generator and FastAPI (5.x) is async; converting sync callers later is the expensive direction. `pb` runs it with `asyncio.run` |
+| D56 | `MODEL_REASONING_EFFORT` is sent only when set; local development sets `none`, production leaves it unset | Qwen's hidden reasoning cost about 30s and 300 tokens per answer and was running when Ollama crashed; a hosted Llama does not reason and may reject the field |
 
 ## Open items
 
@@ -373,8 +392,6 @@ things noticed while doing something else that would otherwise be lost.
 | "You" questions are not rewritten and score lowest in dense (MRR 0.528, 6 questions). Under D51 a visitor's "you" usually means Tae, but sometimes the bot ("can you help me"), so rewriting it is not obviously safe | 3.x, with more "you" questions first |
 | The rewrite makes every name question identical to its pronoun twin for dense, so the 34 pairs can no longer catch a name form the rewrite misses. Unit tests in `test_query_rewrite.py` carry that now | Add a pair whenever a new name form shows up in real traffic |
 | The corpus is first person ("I built") and the bot speaks in the third person (D51). Nothing yet says how generation turns one into the other | 4.x, the prompt |
-| `qwen3.5:9b` reasons before every answer: about 300 hidden tokens and 30s for a one-word reply. `reasoning_effort: "none"` turns it off (1 token, 1.1s), and is a standard chat-completions field, but a hosted Llama endpoint may reject or ignore it. Not sent by anything yet | Tae's decision; likely a `MODEL_REASONING_EFFORT` setting sent only when set, in 4.2 or 4.5 |
-| Every model call logs an `httpx2: HTTP Request: POST ...` INFO line, the SDK's HTTP library speaking through the root logger | Cosmetic; 8.x, alongside the other noisy log lines |
 
 ## Findings
 
