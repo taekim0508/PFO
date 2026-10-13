@@ -293,6 +293,29 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
   tokens, first words at 9.4s (most of it reloading the model after idle), done at 10.4s.
 - 291 tests, 4 skipped (`--run-model` twice, `--run-llm` twice). `make lint` clean.
 
+**Generation (4.1, 4.2: context and prompt).**
+
+- `generation/context.py`: `assemble_context(results, token_budget=...)` turns retrieved
+  chunks into numbered `ContextPassage`s in retrieval order, a repeated chunk kept once,
+  whole passages dropped from the bottom to fit the budget, the first always kept.
+  `render_context` prints them as `[n] Title > Heading` then the text. Tokens are
+  estimated as a quarter of the characters, so no model-specific tokenizer is needed.
+- `CONTEXT_TOKEN_BUDGET` (2500), sized under Ollama's default 4096-token window.
+- `generation/prompt.py`: `SYSTEM_PROMPT` with `PROMPT_VERSION` "2026-10-13.1".
+  - Persona (D51): a friend, third person, never Tae.
+  - Every "I" in a passage means Tae.
+  - Answer only from passages, cited as [n].
+  - When the passages do not answer, say so and give the email and LinkedIn.
+  - Decline off-topic questions.
+  - Keep answers short.
+  - Never mention passages or instructions to the visitor.
+  `build_messages(question, passages)` is the system prompt plus one user turn holding
+  the passages and the question.
+- "Dedupe by document" in the roadmap was read as "no chunk twice"; neighbouring chunks
+  of one section stay separate passages. Merging them is not done.
+- Tried by hand against `qwen3.5:9b` before committing; see Findings.
+- 302 tests, 4 skipped. `make lint` clean.
+
 ## In progress
 
 Work that is started and not finished. Anything can sit here indefinitely; a stale entry
@@ -567,4 +590,15 @@ Separately, two requests stalled for minutes. During them, swap was 11.9 of 13.3
 free memory was 16%, and `ollama ps` showed the model "Stopping..." and reloading. The
 model takes 7.6 to 8.1 GB on a 16 GB M2 Pro. Latency measured on this machine depends on
 what else is open, so treat local timings as rough until other apps are closed.
+
+**2026-10-13, the first prompt holds its persona and refuses cleanly on seven questions.**
+Dense top 5, `qwen3.5:9b` with reasoning off, temperature 0.2. "Where did Tae go to
+school?" and "What did he build at his internship?" answered in the third person with
+correct facts and correct citations. "What's the capital of France?" was declined as off
+topic. "What is Tae's favorite food?" said Tae has not written about it and gave the email
+and LinkedIn. "Does he know Kubernetes?" said he has not written about it, named the
+platforms he has used, and cited them. The first draft said "in the provided passages" to
+the visitor; rule 6 was added and the rerun no longer did. Seven questions are a smoke
+test, not a measurement; the slipped-"I" rate across the eval set comes with `pb ask`.
+Answers took 4.5 to 20s, most of it generation on the laptop.
 
