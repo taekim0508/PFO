@@ -92,6 +92,20 @@ class Settings(BaseSettings):
     # also has to hold the instructions, the question, and the answer, so this stays well
     # under it. Five retrieved chunks typically use about half of it.
     context_token_budget: int = 2500
+    # The strategy `pb ask` and the chat API use unless told otherwise. Dense measured best
+    # once the name rewrite was in (MRR 0.722 against hybrid 0.687, equal recall).
+    default_strategy: Literal["dense", "lexical", "hybrid"] = "dense"
+    # Below this best dense similarity, a question is answered with a fixed "Tae hasn't
+    # written about that" and the model is never called. Every one of the 106 evaluation
+    # questions scored at least 0.542; off-topic questions ranged 0.42 to 0.62, because
+    # technical ones resemble a technical corpus. Set just under the real questions, so it
+    # never refuses a real one, and the prompt's refusal rule catches what passes.
+    relevance_floor: float = 0.52
+    # Low, because the job is retelling passages faithfully, not writing creatively.
+    answer_temperature: float = 0.2
+    # A ceiling on answer length. The prompt asks for two to five sentences, so reaching
+    # this means a runaway answer, which shows as finish "length".
+    answer_max_tokens: int = 500
 
     # Generation. These three are what make the model layer provider-agnostic: Ollama,
     # Together, Groq, and Fireworks all speak the same shape, so switching is config.
