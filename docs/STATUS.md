@@ -420,7 +420,7 @@ Retrieval 3.1 to 3.6 are built. Phase 3 is complete.
 - `make setup` runs `npm ci`. `make dev` runs the API and the site together
   (`dev-api`, `dev-web`). `make test` and `make lint` are `-backend` plus `-frontend`
   halves. CI's backend job runs `make lint-backend`; a new frontend job runs lint,
-  tests, and `next build` on Node 22.
+  tests, and `next build` on Node 22 (see Findings 2026-10-13, the lock file).
 - `@types/node` is ^22 rather than the scaffold's ^20, which vitest 5 refuses.
 - 352 backend tests, 4 skipped; 7 frontend tests. `make lint` clean on both halves.
   `next build` succeeds with `/` prerendered static.
@@ -748,4 +748,21 @@ timings are pessimistic.
   interned as a software" with `finish_reason` None and no error. Asked three times
   afterwards it answered fully each time. A stream that ends without a finish reason
   was being reported as a finished answer; the next commit turns it into an error.
+
+**2026-10-13, the frontend CI job failed on `npm ci`: the lock file was written on macOS.**
+The first frontend run, on `main` after `frontend-foundation` merged, stopped at install
+with `Missing: @emnapi/runtime@1.11.3 from lock file` and the same for `@emnapi/core`.
+They are optional helpers for Tailwind's WebAssembly build. The lock file, written by npm
+11 on the Mac, left them out; npm on Linux requires them to be listed.
+
+- The first fix (#19, reverted in #20) installed npm 11 in CI on the theory that the npm
+  version was the cause. It failed the same way, because it had only been checked on
+  macOS, where npm 10 fails and npm 11 passes. On Linux both fail.
+- Fixed by regenerating `package-lock.json` with `npm install --package-lock-only` (npm 11,
+  in a `node:22` Linux container). It adds 8 optional entries and recomputes some `peer`
+  flags; no package version changes and none are removed.
+- Verified in a `node:22` container with its own npm 10.9.9, the setup CI runs: `npm ci`,
+  lint, 7 tests, and `next build` all pass. `npm ci` also passes on macOS with npm 10 and
+  11.
+- Lesson: a CI fix counts as checked only when it was run on the platform CI uses.
 
